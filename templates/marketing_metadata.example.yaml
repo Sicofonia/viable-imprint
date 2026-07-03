@@ -1,0 +1,46 @@
+# Per-book bibliographic and contact facts — the kind of thing nobody should
+# ask an LLM to guess (ISBN, price, launch date...). Copy this file to
+# templates/marketing_metadata.yaml (gitignored, one per book) and fill it in.
+#
+# Any top-level key here whose value is a list of {label, value} pairs becomes
+# a named block. A task's prompt leaves a literal {{block_name}} token where
+# that block belongs; the engine renders it into a Markdown bullet list and
+# substitutes it in — the LLM never sees or writes these facts. Add, rename,
+# or drop items freely; labels can be in any language.
+#
+# A block with no matching {{...}} token in a given prompt is simply unused
+# by that task — the same file can feed multiple s1d tasks (e.g. press-dossier
+# uses both blocks below; a simpler one-pager might only use book_facts).
+
+book_facts:
+  - label: "Author"
+    value: "John Doe"
+  - label: "Translation"
+    value: "Jane Smith"
+  - label: "Number of Pages"
+    value: "420"
+  - label: "Format"
+    value: "6 x 9 in"
+  - label: "Cover"
+    value: "Paperback"
+  - label: "RRP"
+    value: "37,9 €"
+  - label: "ISBN"
+    value: "978-1-0686007-2-2"
+  - label: "Imprint"
+    value: "Viable Books"
+  - label: "Launch date"
+    value: "Spring 2026"
+
+contact_facts:
+  - label: "Contact"
+    value: "Joe Bloggs"
+  - label: "Email"
+    value: "hello@viablebooks.com"
+  # Leave value blank ("") for facts not ready yet (e.g. no trailer cut yet) —
+  # render_block() skips blank values, so the bullet simply won't appear
+  # rather than showing an empty or invented one.
+  - label: "Book Trailer"
+    value: ""
+  - label: "Web link"
+    value: ""

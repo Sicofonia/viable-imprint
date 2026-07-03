@@ -1,0 +1,17 @@
+# API keys are loaded from .env (MISTRAL_API_KEY, DEEPL_API_KEY)
+# This file contains only non-secret settings and is safe to commit.
+
+llm:
+  provider: mistral
+  model: mistral-large-latest
+  # 0.0 = most deterministic / least creative. Recommended for editorial tasks
+  # (cleanup, ortho, copyedit) where fidelity to the source text matters more
+  # than fluency. Raise it only if output feels too rigid.
+  temperature: 0.0
+
+translation:
+  provider: deepl
+  source_lang: EN
+  target_lang: ES
+
+books_dir: books

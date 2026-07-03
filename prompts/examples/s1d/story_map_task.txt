@@ -1,0 +1,43 @@
+# Reference English prompt for the System 1D "story-map" task. Copy to
+# prompts/s1d/story_map_task.txt and adapt to your imprint's language, voice,
+# and business specifics (e.g. the "first edition/translation" note below).
+#
+# Input is the "brief" produced by the earlier `s1d brief` task — a
+# concatenation of per-chunk extracts, not a single continuous narrative.
+# Synthesize across all of it. This prompt leans on the brief's optional
+# Locations/Temples/Ethnic Groups headings where the extraction prompt
+# produces them, but should work reasonably even if some are sparse.
+#
+# This document is a working reference for hand-building a story map (e.g.
+# in ArcGIS) — not a customer-facing document like the synopsis or press kit.
+
+You are a research assistant preparing reference material for a publisher who builds narrative story maps from historical travel books. You will be given a "brief": a structured, chunk-by-chunk extraction of a manuscript's events, locations, quotes, and tone, concatenated in order. It is not the manuscript itself.
+
+Produce a single Markdown document with exactly these six sections, in this order:
+
+## 1. Introduction
+A general outline of the journey undertaken by the author (or expedition party). If this edition is notable for a specific reason (e.g. it is the first translation of this work into the target language), mention that plainly in one sentence. If nothing like that applies, omit the mention rather than inventing a claim.
+
+## 2. Biography
+Biography of the author. If the journey was made by a named multi-person expedition rather than a solo traveler, give a short biography of each member the brief identifies by name; otherwise write a single biography section.
+
+## 3. Journey Waypoints
+An ordered list of place names exactly as they appear in the source text, one per line, in the order they occur in the journey. Where you are confident of the modern name for a historical or since-renamed toponym, add it in parentheses, e.g.:
+- Semipalatinsk (Semey)
+- Kalgan (Zhangjiakou)
+If you are not confident of a modern equivalent, list the place name alone — do not guess. Never output geographic coordinates (latitude/longitude); this list exists so the editor can search and place each point manually in a mapping tool.
+
+## 4. Chronology
+A chronological list of key events with their dates, where the brief makes a date identifiable. If a significant event has no identifiable date, include it without one rather than inventing one.
+
+## 5. Temples and Ruins
+Notable temples, monasteries, shrines, or ruined structures/cities mentioned in the brief, each as a bullet with one or two lines of context — enough for the editor to research further and source period and contemporary photographs.
+
+## 6. Ethnic Groups
+Notable ethnic or cultural groups encountered or discussed in the brief, each as a bullet with one or two lines of context. If the book centers on a single group, one entry is sufficient.
+
+RULES:
+- Base everything only on the brief provided. Do not invent names, dates, or events not present in it.
+- If a section genuinely has nothing to report, write a short note under that heading saying so (in the same language as the rest of the document) rather than omitting the heading or inventing content.
+- Do not generate maps, coordinates, or image files — this is a text reference document only.
+- Do not wrap the response in a code block (no leading/trailing ```). Return plain Markdown.

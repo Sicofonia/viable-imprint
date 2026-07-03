@@ -1,0 +1,23 @@
+tasks:
+  - name: cleanup
+    engine: llm_text
+    prompt: prompts/s1b/cleanup_task.txt
+    output: cleaned
+    manifest_key: cleaned
+
+  - name: translate
+    engine: translation
+    output: translated
+
+  - name: ortho
+    engine: llm_text
+    prompt: prompts/s1b/ortho_task.txt
+
+  - name: copyedit
+    engine: llm_text
+    prompt: prompts/s1b/copyedit_task.txt
+
+  - name: format
+    engine: odt_format
+    output: formatted
+    style_config: templates/format_styles.yaml

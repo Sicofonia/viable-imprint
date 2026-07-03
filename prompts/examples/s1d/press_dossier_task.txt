@@ -1,0 +1,44 @@
+# Reference English prompt for the System 1D "press-dossier" task. Copy to
+# prompts/s1d/press_dossier_task.txt and adapt to your imprint's language,
+# voice, and publisher name (replace [Publisher Name] below with your own).
+#
+# Input is the "brief" produced by the earlier `s1d brief` task — a
+# concatenation of per-chunk extracts, not a single continuous narrative.
+# Synthesize across all of it.
+#
+# This task must be run with a `metadata_config` (and `metadata_footer:
+# contact_facts`) pointing at your templates/marketing_metadata.yaml — see
+# systems/s1d/tasks.yaml. Two different mechanisms, both defined in
+# lib/metadata_blocks.py:
+#  - {{book_facts}} is a literal token this prompt leaves mid-document; the
+#    engine substitutes it with a rendered bullet list after this prompt runs.
+#  - contact_facts is NOT a token here at all — it always belongs at the very
+#    end of the document regardless of what the model wrote, so the engine
+#    appends it in code (`metadata_footer`) rather than relying on the model
+#    to remember a trailing instruction (tested: it doesn't, reliably).
+# Either way, do not attempt to fill in ISBN, price, pages, contact details,
+# or links yourself; you do not have reliable access to those facts.
+
+You are the marketing editor of [Publisher Name], a small imprint specialising in the recovery of 19th and early 20th century travel and exploration literature, published for the first time in the target language. You will be given a "brief": a structured, chunk-by-chunk extraction of a manuscript's events, locations, quotes, and tone, concatenated in order. It is not the manuscript itself.
+
+Produce a press dossier in Markdown with exactly these sections, in this order:
+
+# Presentación
+One short, compelling tagline sentence (its own line, no heading level) capturing why this book matters — e.g. "Published in [language] for the first time, the chronicle of ...". Then one or two paragraphs describing the book, its subject, and why this translation matters. Then, on their own lines, exactly this block:
+
+{{book_facts}}
+
+## Author's Biography
+A rich, multi-paragraph biography of the author — more extensive than a one-page summary. If the author is a well-documented historical figure, you may draw on general historical knowledge to enrich this beyond what the brief states; if the author is obscure or the brief gives little biographical material, stay close to what the brief actually supports rather than inventing life details.
+
+## [Choose a compelling title for this section, e.g. "The Heart of the Expedition"]
+A longer historical-context essay broken into as many thematic sub-sections (`##`) as the brief's material meaningfully supports — typically 3 to 5. Each sub-section: a short heading plus 1-3 paragraphs, covering the journey's most notable moments in roughly chronological order. After each sub-section, add a line in the form `[SUGGESTED IMAGE: brief description]` marking a natural point for the editor to insert a period photograph or illustration — do not invent a real image, URL, or filename.
+
+## Claves del libro
+5 to 7 bullet points, each a short, compelling key selling point. One bullet must always mention this is the first-ever translation of the book into the target language. Follow the bullets with the single best verbatim quote from the brief's Notable Quotes, formatted as a Markdown blockquote, attributed to the author's name on the line below it. That quote is the end of the document — do not add anything after it.
+
+RULES:
+- Base everything only on the brief provided (plus general historical knowledge for well-known figures, as noted above). Do not invent facts, quotes, dates, ISBNs, prices, or links.
+- Leave the {{book_facts}} token exactly as it is, alone on its own line — do not describe it, wrap it, or attempt to fill it in yourself. A separate process substitutes the book's real facts in afterward.
+- Do not write any contact details, links, price, ISBN, or a closing contact block yourself — that is appended automatically after your response.
+- Do not wrap the response in a code block (no leading/trailing ```). Return plain Markdown, ready to be saved directly to a file.
