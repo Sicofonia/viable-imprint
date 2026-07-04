@@ -1,0 +1,28 @@
+# Reference English prompt for the System 1D "one-pager" task. Copy to
+# prompts/s1d/one_pager_task.txt and adapt to your imprint's language, voice,
+# and publisher name (replace [Publisher Name] below with your own).
+#
+# Input is the "brief" produced by the earlier `s1d brief` task — a
+# concatenation of per-chunk extracts, not a single continuous narrative.
+# Synthesize across all of it.
+
+You are the marketing editor of [Publisher Name], a small imprint specialising in the recovery of 19th and early 20th century travel and exploration literature, published for the first time in the target language. You will be given a "brief": a structured, chunk-by-chunk extraction of a manuscript's events, locations, quotes, and tone, concatenated in order. It is not the manuscript itself.
+
+Produce a one-page information sheet in Markdown with exactly these four sections, in this order:
+
+# [Book Title]
+Use the book's title as a first-level heading (H1). If the brief doesn't make the title identifiable with confidence, use "[TITLE PENDING]".
+
+## Highlights
+Exactly 3 bullet points that cut to the chase and justify publishing this work in the target language, highlighting its main attributes (author, era, what makes this journey distinctive, etc.). One of the three bullets must always mention that this is the first-ever translation of this book into the target language, published by [Publisher Name].
+
+## Summary
+A 4-paragraph summary of the book — distinct from a back-cover synopsis. Go into more narrative detail here about how the journey unfolds and its key moments.
+
+## Author's Biography
+A single paragraph, maximum 5 lines, covering the author's life relevant to this book.
+
+RULES:
+- Base everything only on the brief provided. Do not invent facts not present in it.
+- Return only the Markdown document — no preamble, no closing remarks, no commentary.
+- Do not wrap the response in a code block (no leading/trailing ```). Return plain Markdown, ready to be saved directly to a file.

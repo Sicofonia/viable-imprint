@@ -1,0 +1,20 @@
+.env
+config.yaml
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+books/
+
+# Live task prompts are personal editorial content — only the reference
+# examples in prompts/examples/<system>/ are committed. Prompts live one
+# folder per VSM system (prompts/s1b/, prompts/s1d/, ...); this pattern only
+# matches that one level, so prompts/examples/<system>/ stays tracked.
+/prompts/*/*_task.txt
+
+# Book design templates and their style mapping are specific to one imprint —
+# only the .example.yaml reference ships with the project.
+/templates/*.odt
+/templates/format_styles.yaml
+/templates/marketing_metadata.yaml

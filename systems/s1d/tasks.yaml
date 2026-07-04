@@ -1,0 +1,77 @@
+tasks:
+  - name: brief
+    engine: llm_text
+    prompt: prompts/s1d/marketing_extract_task.txt
+    manifest_key: brief
+
+  - name: synopsis
+    engine: llm_text
+    prompt: prompts/s1d/synopsis_task.txt
+    # Large enough that a full-length manuscript's brief is sent in one call
+    # rather than chunked — synopsis must synthesize the whole book coherently,
+    # unlike `brief`, which deliberately treats each manuscript chunk on its own.
+    max_chars: 100000
+    # Overrides config.yaml's global llm.temperature (0.0, tuned for fidelity
+    # in cleanup/ortho/copyedit). A synopsis is marketing prose, not a
+    # transcription — some creativity reads better than the most likely
+    # next token. Tune freely; this is a starting point, not a fixed rule.
+    temperature: 0.7
+
+  - name: story-map
+    engine: llm_text
+    prompt: prompts/s1d/story_map_task.txt
+    # Same reasoning as synopsis: the brief must be read whole, not chunked.
+    max_chars: 100000
+    # No temperature override — this is a factual reference document (waypoints,
+    # dates, biography), so it inherits config.yaml's fidelity-tuned default
+    # rather than synopsis's creative one.
+
+  - name: one-pager
+    engine: llm_text
+    prompt: prompts/s1d/one_pager_task.txt
+    # Same reasoning as synopsis/story-map: read the brief whole, not chunked.
+    max_chars: 100000
+    # A middle ground: the highlights/summary are sales prose (like synopsis)
+    # but the biography and highlights need to stay closely factual (like
+    # story-map). Lower than synopsis's 0.7; tune freely.
+    temperature: 0.4
+
+  - name: press-dossier
+    engine: llm_text
+    prompt: prompts/s1d/press_dossier_task.txt
+    # Same reasoning as the other expansion tasks: read the brief whole.
+    max_chars: 100000
+    # Mix of persuasive copy (tagline, highlights) and factual sections
+    # (biography, historical context) — same middle-ground logic as one-pager.
+    temperature: 0.4
+    # Injects book_facts mid-document (via a {{book_facts}} token the prompt
+    # leaves) and unconditionally appends contact_facts as the closing block
+    # — see lib/metadata_blocks.py. Copy templates/marketing_metadata.example.yaml
+    # to the path below and fill in this book's real facts before running.
+    metadata_config: templates/marketing_metadata.yaml
+    metadata_footer: contact_facts
+
+  - name: trailer-storyboard
+    engine: llm_text
+    prompt: prompts/s1d/trailer_storyboard_task.txt
+    # Same reasoning as the other expansion tasks: read the brief whole.
+    max_chars: 100000
+    # On-screen text needs to be punchy/dramatic, closer to synopsis's register
+    # than story-map's factual one, though the scene visuals must stay grounded.
+    temperature: 0.6
+
+  - name: goodreads-profile
+    engine: llm_text
+    prompt: prompts/s1d/goodreads_profile_task.txt
+    # Same reasoning as the other expansion tasks: read the brief whole.
+    max_chars: 100000
+    # Discovery-oriented description + shelves — similar middle ground to
+    # one-pager/press-dossier.
+    temperature: 0.4
+
+  - name: metadata
+    engine: metadata_doc
+    # No LLM call, no temperature/max_chars — pure code assembly from
+    # marketing_metadata.yaml plus the brief's <overview> tags. See
+    # engines/metadata_doc.py and lib/metadata_blocks.py.
+    metadata_config: templates/marketing_metadata.yaml

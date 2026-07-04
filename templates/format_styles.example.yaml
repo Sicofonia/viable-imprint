@@ -1,0 +1,15 @@
+# Maps semantic structural roles (fixed names, read by the odt_format engine)
+# to the actual paragraph style names defined in your own .odt template.
+# Style names must match your template exactly, including case.
+#
+# Copy this file to templates/format_styles.yaml and point `template` at
+# your own .odt file. Both that copy and the template itself are gitignored:
+# they're specific to one imprint's book design, not the project's defaults.
+
+template: templates/book_template.odt
+
+styles:
+  chapter_number: "Heading 2"
+  chapter_title: "Heading 1"
+  first_paragraph: "First Paragraph"
+  body: "Normal Paragraph"

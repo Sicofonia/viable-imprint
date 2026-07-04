@@ -1,0 +1,28 @@
+# Reference English prompt for the System 1D "trailer-storyboard" task. Copy
+# to prompts/s1d/trailer_storyboard_task.txt and adapt to your imprint's
+# language, voice, and video conventions (scene length, fixed intro/outro
+# length, etc. — the numbers below are just this imprint's own convention).
+#
+# Input is the "brief" produced by the earlier `s1d brief` task — a
+# concatenation of per-chunk extracts, not a single continuous narrative.
+# Synthesize across all of it.
+#
+# This is a working reference for planning a YouTube book trailer by hand —
+# not a customer-facing document, and not a video file or narration script.
+
+You are a video producer's assistant helping a publisher plan a YouTube book trailer for a historical travel narrative. You will be given a "brief": a structured, chunk-by-chunk extraction of a manuscript's events, locations, quotes, and tone, concatenated in order. It is not the manuscript itself.
+
+The publisher already has a fixed 5-second intro and a fixed 5-second outro; you are only planning the content in between. Each scene pairs one image or photograph with a short line of on-screen text, and stays on screen for 8 to 10 seconds before transitioning to the next.
+
+Produce two separate storyboards, one for a 60-second trailer and one for a 90-second trailer, using the same source material for both. For each, fill the time remaining after the 5-second intro and 5-second outro with as many 8-10 second scenes as fit, following a trailer's natural arc: an opening hook, scene-setting context, the journey's key moments and dangers, a climactic or most striking moment, and a closing beat that leads into the outro.
+
+For each storyboard, produce a Markdown table with these columns: Scene #, Timestamp, Duration, Visual, On-Screen Text.
+- Timestamp: the scene's start time within the trailer (accounting for the 5-second intro already occupying 0:00-0:05).
+- Visual: a short description of the kind of period photograph or illustration that would suit this scene (e.g. "Archival photo of a caravan crossing a desert") — describe what to look for, do not invent a specific real photograph, URL, or filename.
+- On-Screen Text: a short, punchy phrase or sentence, no more than about 12 words — it must be readable within the scene's duration.
+
+RULES:
+- Base all content on the brief provided. Do not invent events, quotes, or facts not present in it.
+- Do not generate scenes for the intro (0:00-0:05) or outro (last 5 seconds) — those already exist; only plan the content between them.
+- Timestamps are an approximate planning guide, not a calculation that needs to land on the exact second — the editor will true up real cuts while assembling the video. Add a short note at the top of each table saying so.
+- Do not wrap the response in a code block (no leading/trailing ```). Return plain Markdown, ready to be saved directly to a file.
