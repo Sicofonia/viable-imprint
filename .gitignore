@@ -1,5 +1,10 @@
 .env
 config.yaml
+CLAUDE.local.md
+
+# Personal Claude Code overrides (permission mode, machine-specific allow
+# rules) — .claude/settings.json (team-wide) is still committed.
+.claude/settings.local.json
 __pycache__/
 *.pyc
 *.pyo
@@ -18,3 +23,8 @@ books/
 /templates/*.odt
 /templates/format_styles.yaml
 /templates/marketing_metadata.yaml
+
+# System 4's scanned intelligence output and watchlist are personal/business-
+# sensitive — same treatment as books/. Only sources.example.yaml is committed.
+/intelligence/
+/systems/s4/sources.yaml

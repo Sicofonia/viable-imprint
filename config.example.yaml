@@ -3,7 +3,13 @@
 
 llm:
   provider: mistral
-  model: mistral-large-latest
+  # mistral-medium-latest is the default: running an entire book plus every
+  # System 1D/System 4 task through mistral-large-latest burns tokens far
+  # faster than the quality difference justifies for this pipeline's editorial
+  # and marketing tasks. This applies to every task — there's no per-task
+  # model override yet (unlike temperature/max_chars, see tasks.yaml), so
+  # switching back to large means changing this one line.
+  model: mistral-medium-latest
   # 0.0 = most deterministic / least creative. Recommended for editorial tasks
   # (cleanup, ortho, copyedit) where fidelity to the source text matters more
   # than fluency. Raise it only if output feels too rigid.
@@ -15,3 +21,8 @@ translation:
   target_lang: ES
 
 books_dir: books
+
+# Root folder for System 4 (Strategic Intelligence) — not book-scoped, so it
+# lives outside books_dir. Structured like a book internally (its own
+# manifest.yaml, s4/ subfolder) — see docs/adr/003-system-4-strategic-intelligence.md.
+intelligence_dir: intelligence

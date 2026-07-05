@@ -32,16 +32,19 @@ The pipeline is organised in four layers:
 
 **`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods.
 
-**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking, ODT generation, path resolution, and loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks.
+**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, and the System 2 task-graph orchestrator (`lib/orchestrator.py`).
 
-**`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by ten different tasks across both systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all). Engines are written once and reused by any task that needs that shape of work.
+**`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by eleven different tasks across three systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all), `feed_scan` (pull new items from a curated watchlist of external sources — RSS/Atom feeds, Project Gutenberg's bulk catalog, and an imprint's own catalog page — no LLM call). Engines are written once and reused by any task that needs that shape of work.
 
 **`systems/`** — one subfolder per VSM system, each holding a single `tasks.yaml` manifest. Only systems with implemented tasks exist here; a system is added when its first task is written. Each manifest entry names a task, the engine it uses, and that engine's parameters (typically a prompt file):
 
 - `systems/s1b/tasks.yaml` — System 1B (Editorial Production): cleanup, translate, ortho, copyedit, format
 - `systems/s1d/tasks.yaml` — System 1D (Publication and Marketing): brief, synopsis, story-map, one-pager, press-dossier, trailer-storyboard, goodreads-profile, metadata (see `docs/adr/002-marketing-brief-pipeline.md` for why marketing is a chain of small tasks rather than one big one)
+- `systems/s4/tasks.yaml` — System 4 (Strategic Intelligence): scan, briefing (see `docs/adr/003-system-4-strategic-intelligence.md`) — unlike S1B/S1D, System 4 isn't about any one book, so it doesn't live under `books/` at all; see below
 
 Adding a new LLM-driven editorial task to a system requires writing a prompt file and adding a few lines to that system's `tasks.yaml` — no Python. The CLI itself is built dynamically from these manifests at startup (see `lib/task_loader.py`), so `pipeline.py <system> --help` always reflects whatever that system is currently configured to do.
+
+**`pipeline.py s2`** is the one command group that isn't manifest-driven — System 2 (Coordination) doesn't declare its own tasks, it coordinates the ones System 1B and System 1D already declare. It reads every book-scoped `tasks.yaml` to build a cross-system task graph (each task's `input:` field, or positional chaining within a system when `input:` is absent) and checks it against a run-state ledger recorded in the book's own `manifest.yaml`. `pipeline.py s2 status <book>` shows what's done, ready, or blocked (and why); `pipeline.py s2 run <book>` runs every currently-unblocked task, across both systems, until nothing further is unblocked — turning thirteen hand-typed commands into one. See `docs/adr/004-system-2-run-orchestration.md`.
 
 **Every task's output lands under the VSM system that produced it** (`s1b/`, `s1d/`), mirroring the CLI's own nested command structure (`pipeline.py s1b <task>`, `pipeline.py s1d <task>`) — a book's folder never mixes editorial-production output with marketing output at the same level. `manifest.yaml` is the one exception, staying at the book root since it's shared across every system. Cross-system chaining still works exactly as you'd expect: `s1d brief`, for instance, reads from `s1b/copyedit/es/`, and its own output lands under `s1d/`, not `s1b/`.
 
@@ -60,15 +63,17 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 | `s1d trailer-storyboard` | System 1D | Brief | Two scene-by-scene storyboards (60s and 90s) for a YouTube book trailer, in `s1d/trailer-storyboard/es/` |
 | `s1d goodreads-profile` | System 1D | Brief | Description, author bio, and suggested shelves in `s1d/goodreads-profile/es/`, meant to be copy-pasted into Goodreads by hand (there is no API for this — see Setup) |
 | `s1d metadata` | System 1D | Brief + `marketing_metadata.yaml` | Bibliographic reference sheet in `s1d/metadata/es/` — pure data assembly, no LLM call |
+| `s4 scan` | System 4 | Nothing (external sources per `systems/s4/sources.yaml`) | New items since the last scan in `intelligence/s4/scan/<date>/` — no LLM call, no book involved at all |
+| `s4 briefing` | System 4 | That day's scan | Strategic intelligence briefing in `intelligence/s4/briefing/<date>/` |
 
-**`prompts/`** — plain text task prompts for the LLM calls, one folder per VSM system (`prompts/s1b/`, `prompts/s1d/`) so prompts don't get lumped together as the project grows. Edit these to tune editorial behaviour without touching Python. The live prompts are gitignored, since they encode a specific imprint's editorial voice; only `prompts/examples/<system>/` is committed, as reference material. See Setup below.
+**`prompts/`** — plain text task prompts for the LLM calls, one folder per VSM system (`prompts/s1b/`, `prompts/s1d/`, `prompts/s4/`) so prompts don't get lumped together as the project grows. Edit these to tune editorial behaviour without touching Python. The live prompts are gitignored, since they encode a specific imprint's editorial voice; only `prompts/examples/<system>/` is committed, as reference material. See Setup below.
 
 **`templates/`** holds two independent things, both gitignored (only their `.example` counterparts are committed):
 
 - `format_styles.yaml` — `format` doesn't build a document from scratch; it loads your own `.odt` template (page setup, margins, and named paragraph styles already defined) and appends the manuscript to it, using your template's own style names. This file maps a small set of structural roles — `chapter_number`, `chapter_title`, `first_paragraph`, `body` — to whatever you've actually named those styles in your template. Chapter structure is detected directly from the text (a short, all-uppercase line containing a roman numeral or digit is the chapter number; an immediately following short uppercase line is the title) — no markup tags required. Inline `[i]`/`[sc]`/`[FN: ...]` markup is left as plain visible text in the output by design; applying that formatting is a manual step.
 - `marketing_metadata.yaml` — bibliographic and contact facts (author, ISBN, price, launch date, email, links...) for a single book, grouped into named blocks. `s1d press-dossier` and `s1d metadata` read this; neither ever asks an LLM to guess a fact that belongs here. Add, rename, or drop blocks freely — see `lib/metadata_blocks.py` and `docs/adr/002-marketing-brief-pipeline.md` for how a prompt requests a block by name.
 
-Each book lives in its own folder under `books/`. A `manifest.yaml` in each folder records which files have been processed, by which provider and model, so the record travels with the text.
+Each book lives in its own folder under `books/`. A `manifest.yaml` in each folder records which files have been processed, by which provider and model, so the record travels with the text. It also carries a `tasks:` block — the System 2 run-state ledger, keyed as `<system>.<task-name>` (e.g. `s1b.cleanup`, `s1d.brief`), recording each task's status (`done`/`failed`), output path, and timestamp. This is written automatically by every task run, whether invoked manually (`s1b cleanup <file>`) or through `s2 run` — it's what `s2 status`/`s2 run` read to know what's already done.
 
 ```
 books/
@@ -91,6 +96,26 @@ books/
         ├── goodreads-profile/es/
         └── metadata/es/
 ```
+
+**System 4 doesn't operate on a book at all**, so it doesn't live under `books/`. `systems/s4/sources.yaml` (gitignored; `sources.example.yaml` committed) declares a curated watchlist — RSS/Atom feeds, Project Gutenberg's own bulk catalog dump (filtered by subject keywords, not scraped), and your own catalog page as a standing reference for spotting genuine gaps. `scan` and `briefing` write into a single perpetual `intelligence/` folder at the repo root, gitignored like `books/`, structured the same way a book is internally (its own `manifest.yaml`, a `s4/` subfolder) even though it isn't one:
+
+```
+intelligence/
+├── manifest.yaml
+└── s4/
+    ├── scan/
+    │   ├── _state.yaml       # last-seen item per source, persists across runs
+    │   └── 2026-07-04/
+    │       ├── valordecambio.txt
+    │       ├── gutenberg.txt
+    │       ├── <your-catalog>.txt
+    │       └── combined.txt   # what `briefing` reads
+    └── briefing/
+        └── 2026-07-04/
+            └── combined.txt
+```
+
+See `docs/adr/003-system-4-strategic-intelligence.md` for why System 4 needed this rather than fitting the book-scoped shape S1B/S1D use, and for the reliability lessons that shaped `scan`'s output format (worth reading before writing a new prompt whose input is `scan`'s output).
 
 ---
 
@@ -181,6 +206,15 @@ cp templates/marketing_metadata.example.yaml templates/marketing_metadata.yaml
 
 Fill in this specific book's real bibliographic and contact facts (author, ISBN, price, launch date, email, links...). `s1d press-dossier` and `s1d metadata` read this file directly and will fail with a clear error if it's missing — this is by design, so a real fact is never silently replaced with an LLM's guess.
 
+**7. Set up System 4's watchlist and briefing prompt**
+
+```bash
+cp systems/s4/sources.example.yaml systems/s4/sources.yaml
+cp prompts/examples/s4/briefing_task.txt prompts/s4/briefing_task.txt
+```
+
+The example ships with two real, working feeds (`valordecambio.com`, Internet Archive's blog) and a working Project Gutenberg catalog filter — genuinely useful defaults for any public-domain-focused imprint, not placeholders. Point `catalog_reference` at wherever your own site lists your catalog, and tune the Gutenberg `subject_keywords` to your own niche (keep them geographically/topically specific — see the comments in the file for why).
+
 ---
 
 ## Running the pipeline
@@ -196,6 +230,17 @@ uv run python pipeline.py init life-as-explorer
 ```
 
 Place your source `.txt` file in `books/life-as-explorer/s1b/source/`. Every other folder is created automatically the first time a task writes to it, nested under whichever system produced it.
+
+**Let System 2 run the whole pipeline for you, or walk through it by hand:**
+
+```bash
+uv run python pipeline.py s2 status life-as-explorer   # what's done, what's next, what's blocked
+uv run python pipeline.py s2 run life-as-explorer       # run every currently-ready task, across s1b and s1d
+```
+
+`s2 run` resolves each task's input from whatever the previous task produced (no retyping file paths), runs everything currently unblocked, and stops once nothing further is unblocked — independent tasks (e.g. System 1D's seven deliverables, which all read `brief`, not each other) keep going even if one of them fails; a failed task is simply retried the next time you run `s2 run`. Add `--only s1b` to restrict to one system, or `--step` to run exactly one ready task and stop — useful for reviewing `s1d brief` by hand before letting the (paid) expansion calls fire. See `docs/adr/004-system-2-run-orchestration.md`.
+
+The rest of this section walks through the same pipeline one command at a time, useful for understanding what each step does or for rerunning a single one after a manual edit.
 
 **Clean OCR text:**
 
@@ -254,6 +299,28 @@ uv run python pipeline.py s1d metadata books/life-as-explorer/s1d/brief/es/my-li
 `press-dossier` and `metadata` also read `templates/marketing_metadata.yaml` (Setup, step 6) and will stop with a clear error if it doesn't exist yet — bibliographic facts are merged in from that file, never generated by the LLM.
 
 Want a ninth deliverable — a blog post, an email newsletter blurb, anything else built from the same brief? Write a prompt and add four lines to `systems/s1d/tasks.yaml`; no Python required. See `docs/adr/002-marketing-brief-pipeline.md` for the underlying design and the reliability lessons learned building the seven above (in particular: prompts whose output is only read by another LLM can use ordinary Markdown headings, but a prompt whose output gets parsed by *code* — like `brief`'s — needs XML-style tags instead, which held up far more reliably in testing).
+
+**Scan your industry watchlist and generate a strategic intelligence briefing (System 4):**
+
+Unlike every command above, `scan` doesn't take a file argument at all — there's no book involved, just your configured sources:
+
+```bash
+uv run python pipeline.py s4 scan
+```
+
+This writes `intelligence/s4/scan/<today>/combined.txt`. Then:
+
+```bash
+uv run python pipeline.py s4 briefing intelligence/s4/scan/<today>/combined.txt
+```
+
+There's no scheduler built into this pipeline (by design — see the Inspiration section above: no background process, the filesystem is the record). Run these two commands by hand, or wire them into an OS-level scheduled task (cron, Windows Task Scheduler) if you want a weekly cadence to happen automatically:
+
+```bash
+uv run python pipeline.py s4 scan && uv run python pipeline.py s4 briefing intelligence/s4/scan/$(date +%Y-%m-%d)/combined.txt
+```
+
+`scan` is resilient to a single source failing (a feed timing out, a site returning an error) — it warns and continues with the rest rather than aborting the whole run. See `docs/adr/003-system-4-strategic-intelligence.md` for the full design, including why Project Gutenberg needed its bulk catalog file rather than its RSS feed, and several further prompt-reliability lessons beyond the ones ADR 002 already found.
 
 ---
 

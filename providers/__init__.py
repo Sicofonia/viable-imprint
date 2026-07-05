@@ -17,7 +17,7 @@ def get_llm_provider(config: dict) -> LLMProvider:
         from providers.llm.mistral import MistralProvider
         return MistralProvider(
             api_key=api_key,
-            model=config["llm"].get("model", "mistral-large-latest"),
+            model=config["llm"].get("model", "mistral-medium-latest"),
             temperature=config["llm"].get("temperature", 0.0),
         )
     raise ValueError(f"Unknown LLM provider: {name!r}. Supported: mistral")

@@ -3,6 +3,10 @@ tasks:
     engine: llm_text
     prompt: prompts/s1d/marketing_extract_task.txt
     manifest_key: brief
+    # Cross-system dependency (ADR 004): brief reads System 1B's final output,
+    # not a prior System 1D task — so it can't rely on default positional
+    # chaining, which only ever looks within one system's own task list.
+    input: s1b.copyedit
 
   - name: synopsis
     engine: llm_text
@@ -16,6 +20,11 @@ tasks:
     # transcription — some creativity reads better than the most likely
     # next token. Tune freely; this is a starting point, not a fixed rule.
     temperature: 0.7
+    # Every task below fans out from `brief` (ADR 002), not from each other —
+    # each needs its own explicit `input:` override (ADR 004); positional
+    # default-chaining would otherwise wire it to the *previous* task in this
+    # list, which is wrong for a fan-out shape.
+    input: s1d.brief
 
   - name: story-map
     engine: llm_text
@@ -25,6 +34,7 @@ tasks:
     # No temperature override — this is a factual reference document (waypoints,
     # dates, biography), so it inherits config.yaml's fidelity-tuned default
     # rather than synopsis's creative one.
+    input: s1d.brief
 
   - name: one-pager
     engine: llm_text
@@ -35,6 +45,7 @@ tasks:
     # but the biography and highlights need to stay closely factual (like
     # story-map). Lower than synopsis's 0.7; tune freely.
     temperature: 0.4
+    input: s1d.brief
 
   - name: press-dossier
     engine: llm_text
@@ -50,6 +61,7 @@ tasks:
     # to the path below and fill in this book's real facts before running.
     metadata_config: templates/marketing_metadata.yaml
     metadata_footer: contact_facts
+    input: s1d.brief
 
   - name: trailer-storyboard
     engine: llm_text
@@ -59,6 +71,7 @@ tasks:
     # On-screen text needs to be punchy/dramatic, closer to synopsis's register
     # than story-map's factual one, though the scene visuals must stay grounded.
     temperature: 0.6
+    input: s1d.brief
 
   - name: goodreads-profile
     engine: llm_text
@@ -68,6 +81,7 @@ tasks:
     # Discovery-oriented description + shelves — similar middle ground to
     # one-pager/press-dossier.
     temperature: 0.4
+    input: s1d.brief
 
   - name: metadata
     engine: metadata_doc
@@ -75,3 +89,4 @@ tasks:
     # marketing_metadata.yaml plus the brief's <overview> tags. See
     # engines/metadata_doc.py and lib/metadata_blocks.py.
     metadata_config: templates/marketing_metadata.yaml
+    input: s1d.brief

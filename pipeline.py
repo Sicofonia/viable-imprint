@@ -14,6 +14,8 @@ Usage examples:
   python pipeline.py s1b copyedit books/life-as-explorer/s1b/ortho/es/my-life.txt
   python pipeline.py s1b format books/life-as-explorer/s1b/copyedit/es/my-life.txt
   python pipeline.py s1d brief books/life-as-explorer/s1b/copyedit/es/my-life.txt
+  python pipeline.py s2 status life-as-explorer
+  python pipeline.py s2 run life-as-explorer
 
 Output always lands under the VSM system that produced it (s1b/, s1d/, ...),
 mirroring this CLI's own nested command structure — only manifest.yaml stays
@@ -26,6 +28,7 @@ import click
 import yaml
 from dotenv import load_dotenv
 
+from lib import orchestrator
 from lib.task_loader import build_system_group
 
 load_dotenv()  # reads .env into os.environ before any provider is instantiated
@@ -100,6 +103,85 @@ def init(ctx, book_slug):
 
 cli.add_command(build_system_group("s1b", "System 1B — Editorial Production"))
 cli.add_command(build_system_group("s1d", "System 1D — Publication and Marketing"))
+cli.add_command(build_system_group("s4", "System 4 — Strategic Intelligence"))
+
+
+# ---------------------------------------------------------------------------
+# System 2 — Coordination. Unlike s1b/s1d/s4, this group is hand-written, not
+# manifest-driven: System 2 coordinates *across* systems rather than
+# declaring its own tasks. See docs/adr/004-system-2-run-orchestration.md.
+# ---------------------------------------------------------------------------
+
+def _resolve_book_root(config: dict, book_slug: str) -> Path:
+    root = (Path(config.get("books_dir", "books")) / book_slug).resolve()
+    if not (root / "manifest.yaml").exists():
+        raise click.ClickException(
+            f"No manifest.yaml found at {root}. Run `pipeline.py init {book_slug}` first."
+        )
+    return root
+
+
+_SYSTEM_LABELS = {
+    "s1b": "System 1B — Editorial Production",
+    "s1d": "System 1D — Publication and Marketing",
+}
+
+
+@click.group(name="s2", help="System 2 — Coordination (run-state and task orchestration)")
+def s2():
+    pass
+
+
+@s2.command(name="status")
+@click.argument("book_slug")
+@click.pass_context
+def s2_status(ctx, book_slug):
+    """Show every book-scoped task's status: done, ready, blocked, or failed."""
+    root = _resolve_book_root(ctx.obj["config"], book_slug)
+    click.echo(f"Book: {book_slug} ({root})")
+
+    current_system = None
+    for row in orchestrator.book_status(root):
+        if row["system"] != current_system:
+            current_system = row["system"]
+            click.echo(f"\n{_SYSTEM_LABELS[current_system]}")
+
+        name = row["name"]
+        if row["status"] == "done":
+            click.echo(f"  [x] {name:<20} {row['output']}")
+        elif row["status"] == "ready":
+            click.echo(f"  [ ] {name:<20} ready")
+        elif row["status"] == "failed":
+            retry = "ready to retry" if row["ready_to_retry"] else "blocked"
+            click.echo(f"  [!] {name:<20} failed ({retry}) — {row['error']}")
+        else:
+            click.echo(f"  [ ] {name:<20} blocked — {row['reason']}")
+
+
+@s2.command(name="run")
+@click.argument("book_slug")
+@click.option("--only", type=click.Choice(["s1b", "s1d"]), default=None,
+              help="Restrict to one system.")
+@click.option("--step", is_flag=True, help="Run exactly one ready task and stop.")
+@click.pass_context
+def s2_run(ctx, book_slug, only, step):
+    """Run every currently-ready task, across systems, until nothing more is unblocked."""
+    config = ctx.obj["config"]
+    root = _resolve_book_root(config, book_slug)
+    summary = orchestrator.run_book(root, config, only=only, step=step)
+
+    click.echo(f"\nDone: {len(summary['done'])}, Failed: {len(summary['failed'])}")
+    for label in summary["done"]:
+        click.echo(f"  [x] {label}")
+    for label in summary["failed"]:
+        click.echo(f"  [!] {label}")
+    if summary["complete"]:
+        click.echo("Book complete — nothing left to run.")
+    if summary["failed"]:
+        sys.exit(1)
+
+
+cli.add_command(s2)
 
 
 # ---------------------------------------------------------------------------

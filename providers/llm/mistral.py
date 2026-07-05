@@ -5,7 +5,7 @@ _API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 
 class MistralProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str = "mistral-large-latest", temperature: float = 0.0):
+    def __init__(self, api_key: str, model: str = "mistral-medium-latest", temperature: float = 0.0):
         self._api_key = api_key
         self._model = model
         self._temperature = temperature
