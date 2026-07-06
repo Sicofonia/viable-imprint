@@ -1,0 +1,10 @@
+tasks:
+  - name: scan
+    engine: feed_scan
+    sources_config: systems/s4/sources.yaml
+
+  - name: briefing
+    engine: llm_text
+    prompt: prompts/s4/briefing_task.txt
+    # Read the whole combined scan in one call, not chunked.
+    max_chars: 100000

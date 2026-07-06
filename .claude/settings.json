@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "WebFetch(domain:www.valordecambio.com)",
+      "WebFetch(domain:valordecambio.com)",
+      "WebFetch(domain:www.gutenberg.org)",
+      "WebFetch(domain:www.ecosdeoriente.com)"
+    ]
+  }
+}

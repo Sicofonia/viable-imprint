@@ -1,0 +1,52 @@
+# System 4's curated watchlist. Copy to systems/s4/sources.yaml and adjust.
+# Real, gitignored per-imprint config — see docs/adr/003-system-4-strategic-intelligence.md.
+#
+# Three source types, each scanned differently by engines/feed_scan.py:
+
+# `feeds` — any RSS/Atom feed. New items (not seen in a previous `scan` run)
+# get included; nothing is followed beyond what the feed itself returns.
+# The two below are real, working feeds, genuinely useful defaults for any
+# imprint working with public-domain / translated / niche non-fiction —
+# keep them even if you add your own.
+feeds:
+  - name: valordecambio
+    label: "Valor de Cambio — industria editorial en español"
+    feed_url: https://valordecambio.com/feed/
+    language: es
+  - name: internet-archive-blog
+    label: "Internet Archive Blog"
+    feed_url: https://blog.archive.org/feed/
+    language: en
+
+# `gutenberg_catalog` — Project Gutenberg's own bulk catalog dump (their
+# sanctioned mechanism for automated access, not a scrape), filtered by
+# subject keywords so you only see new listings actually in your genre.
+# Tune the keyword list to your own imprint's scope; these are Library of
+# Congress subject-heading phrases, not free-text search terms — substring
+# matched, case-insensitive, against each book's Subjects/Bookshelves/LoCC.
+#
+# Keep these geographically/topically SPECIFIC, not generic — broad terms
+# like "Explorers" or "Description and travel" alone match thousands of
+# unrelated books (they're common LCSH tags across all travel-adjacent
+# literature, any country). Always pair a genre term with the actual place
+# or subject your imprint covers.
+gutenberg_catalog:
+  catalog_url: https://www.gutenberg.org/cache/epub/feeds/pg_catalog.csv
+  # max_new_items caps how many matches get reported per run (default 50) —
+  # a safety net against a too-broad keyword flooding the briefing prompt,
+  # keeping the most recently-added matches (highest Text#).
+  max_new_items: 50
+  subject_keywords:
+    - "Central Asia"
+    - "Antarctica -- Description and travel"
+
+# `catalog_reference` — your own already-published catalog, fetched fresh
+# every run (not diffed — this is context, not news). Lets the briefing tell
+# "we don't publish this yet" apart from "we already do." Point this at
+# wherever your own site lists your catalog.
+catalog_reference:
+  - name: our-catalog
+    label: "Our current catalog"
+    urls:
+      - https://www.example-imprint.com/catalog/page/1/
+      - https://www.example-imprint.com/catalog/page/2/

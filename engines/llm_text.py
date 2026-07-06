@@ -16,11 +16,38 @@ from providers import get_llm_provider
 # ever starts with two consecutive heading markers.
 _DOUBLED_HEADING_RE = re.compile(r"^#{1,6} (?=#{1,6} )", re.MULTILINE)
 
+# Same story as above, different defect: despite an explicit "don't wrap in
+# a code block" rule, a chunk's response occasionally comes back as one
+# big ```-fenced block anyway. Stripped per-chunk (not just on the final
+# joined text) so a fence around one chunk of a multi-chunk response still
+# gets caught.
+_CODE_FENCE_RE = re.compile(r"^```[^\n]*\n(.*)\n```$", re.DOTALL)
+
+# A third variant: sometimes the model reproduces a heading's *position*
+# faithfully but wraps the whole thing in a single bracket pair anyway
+# ("## [¿Qué ha ocurrido en este período?]"), even when told explicitly
+# never to put brackets in a heading and even after removing every bracket
+# from the template's own heading lines. Three rounds of prompt wording
+# (docs/adr/003-system-4-strategic-intelligence.md's `briefing` task) didn't
+# eliminate it, so — same call as the other two normalizers above — it's
+# fixed in code: no legitimate heading is ever entirely wrapped in one
+# matching bracket pair, so stripping the brackets is safe unconditionally.
+# Heading *wording* still varies run to run; only the visible bracket
+# artifact is being fixed here.
+_BRACKETED_HEADING_RE = re.compile(r"^(#{1,6}) \[(.+)\]$", re.MULTILINE)
+
 
 def _normalize_headings(text: str) -> str:
     while _DOUBLED_HEADING_RE.search(text):
         text = _DOUBLED_HEADING_RE.sub("", text)
+    text = _BRACKETED_HEADING_RE.sub(r"\1 \2", text)
     return text
+
+
+def _strip_code_fence(text: str) -> str:
+    text = text.strip()
+    match = _CODE_FENCE_RE.match(text)
+    return match.group(1).strip() if match else text
 
 
 def run(input_file: Path, root: Path, system: str, output_name: str, config: dict,
@@ -43,7 +70,7 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     parts = []
     for i, chunk in enumerate(chunks, 1):
         click.echo(f"  {output_name} chunk {i}/{total}...")
-        parts.append(llm.complete(system_prompt, chunk, temperature=temperature))
+        parts.append(_strip_code_fence(llm.complete(system_prompt, chunk, temperature=temperature)))
 
     output_text = _normalize_headings("\n\n".join(parts))
     if metadata:
@@ -59,7 +86,7 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
         root,
         **{key: str(output_file.relative_to(root))},
         llm_provider=config["llm"]["provider"],
-        llm_model=config["llm"].get("model", "mistral-large-latest"),
+        llm_model=config["llm"].get("model", "mistral-medium-latest"),
         **source_kwargs,
     )
 
