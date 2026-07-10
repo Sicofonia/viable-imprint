@@ -1,11 +1,12 @@
 import importlib
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 import yaml
 
-from lib import manifest, paths
+from lib import manifest, metrics, paths
 
 # "input" is reserved too: it's consumed by the System 2 orchestrator (ADR 004)
 # to resolve a task's default input from the run-state ledger, not passed
@@ -36,21 +37,36 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _run_recorded(run_fn, root: Path, system: str, name: str):
-    """Call an engine's `run_fn` (already bound to its args), then record the
-    outcome in the run-state ledger (ADR 004) — the one shared hook both
-    manual single-task invocation and the System 2 orchestrator go through,
-    so `manifest.yaml`'s `tasks:` block stays accurate regardless of which
-    path ran a task.
+def _run_recorded(run_fn, root: Path, system: str, name: str, config: dict):
+    """Call an engine's `run_fn` (already bound to its args), time it, and
+    record the outcome in the run-state ledger (ADR 004/005) — the one
+    shared hook both manual single-task invocation and the System 2
+    orchestrator go through, so `manifest.yaml`'s `tasks:` block stays
+    accurate regardless of which path ran a task.
+
+    `run_fn` may return either a bare `Path` (engines with no external
+    provider call: `odt_format`, `metadata_doc`, `feed_scan`) or a
+    `(Path, {"usage": {...}})` tuple (`llm_text`, `translation`) — see
+    ADR 005. `lib.metrics.enrich()` turns raw usage into ledger fields
+    (provider/model/cost_usd); tasks with no usage contribute none of those
+    fields, only `duration_seconds`.
     """
     key = f"{system}.{name}"
+    start = time.monotonic()
     try:
-        output_file = run_fn()
+        result = run_fn()
     except Exception as e:
-        manifest.record_task(root, key, status="failed", error=str(e), attempted_at=_now_iso())
+        manifest.record_task(root, key, status="failed", error=str(e), attempted_at=_now_iso(),
+                              duration_seconds=round(time.monotonic() - start, 2))
         raise
-    manifest.record_task(root, key, status="done",
-                          output=str(output_file.relative_to(root)), completed_at=_now_iso())
+
+    duration = round(time.monotonic() - start, 2)
+    output_file, raw_metrics = result if isinstance(result, tuple) else (result, {})
+    manifest.record_task(
+        root, key, status="done",
+        output=str(output_file.relative_to(root)), completed_at=_now_iso(),
+        duration_seconds=duration, **metrics.enrich(raw_metrics, config),
+    )
     return output_file
 
 
@@ -73,7 +89,7 @@ def run_task(root: Path, config: dict, system: str, task: dict,
     else:
         run_fn = lambda: engine.run(input_file, root, system, output_name, config, **extra_params, **cli_kwargs)
 
-    return _run_recorded(run_fn, root, system, name)
+    return _run_recorded(run_fn, root, system, name, config)
 
 
 def _build_command(task: dict, system_name: str) -> click.Command:

@@ -22,13 +22,14 @@ mirroring this CLI's own nested command structure — only manifest.yaml stays
 at the book root, since it's shared across every system.
 """
 import sys
+from datetime import date
 from pathlib import Path
 
 import click
 import yaml
 from dotenv import load_dotenv
 
-from lib import orchestrator
+from lib import dashboard, orchestrator
 from lib.task_loader import build_system_group
 
 load_dotenv()  # reads .env into os.environ before any provider is instantiated
@@ -182,6 +183,104 @@ def s2_run(ctx, book_slug, only, step):
 
 
 cli.add_command(s2)
+
+
+# ---------------------------------------------------------------------------
+# System 3 — Performance Monitoring. Hand-written like s2: read-only
+# aggregation over the run-state ledger, no tasks of its own. Deliberately
+# reporting-only — no resource allocation, budget tracking, or decisions.
+# See docs/adr/005-system-3-performance-monitoring.md.
+# ---------------------------------------------------------------------------
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(round(seconds or 0))
+    minutes, secs = divmod(seconds, 60)
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
+def _format_cost(cost_usd) -> str:
+    if cost_usd is None:
+        return "-"
+    # Per-task costs for short texts are routinely sub-cent — 3 decimals
+    # would silently round them to "$0.000", hiding real signal.
+    return f"${cost_usd:.6f}" if cost_usd < 0.01 else f"${cost_usd:.3f}"
+
+
+def _format_span(start_iso: str, end_iso: str) -> str:
+    if not start_iso:
+        return "no runs yet"
+    start = date.fromisoformat(start_iso[:10])
+    end = date.fromisoformat(end_iso[:10])
+    days = (end - start).days
+    label = "in progress" if days == 0 else f"{days} day{'s' if days != 1 else ''}"
+    return f"{start} -> {end} ({label})"
+
+
+@click.group(name="s3", help="System 3 — Performance Monitoring (metrics dashboard)")
+def s3():
+    pass
+
+
+@s3.command(name="dashboard")
+@click.argument("book_slug", required=False)
+@click.pass_context
+def s3_dashboard(ctx, book_slug):
+    """Show captured cost/duration metrics — one book, or the whole portfolio."""
+    config = ctx.obj["config"]
+
+    if book_slug:
+        root = _resolve_book_root(config, book_slug)
+        summary = dashboard.book_summary(root)
+        click.echo(f"Book: {book_slug}\n")
+        click.echo(f"{'Task':<24}  {'Duration':>8}  {'Provider/Model':<32}  {'Usage':<22}  {'Cost':>10}")
+        for key, entry in sorted(summary["tasks"].items()):
+            if entry.get("status") != "done":
+                continue
+            provider_model = entry.get("model") or entry.get("provider") or "-"
+            if entry.get("model") and entry.get("provider"):
+                provider_model = f"{entry['provider']} / {entry['model']}"
+            usage = entry.get("usage")
+            if usage and "total_tokens" in usage:
+                usage_str = f"{usage['total_tokens']:,} tokens"
+            elif usage and "characters" in usage:
+                usage_str = f"{usage['characters']:,} characters"
+            else:
+                usage_str = "-"
+            click.echo(f"{key:<24}  {_format_duration(entry.get('duration_seconds')):>8}  "
+                       f"{provider_model:<32}  {usage_str:<22}  {_format_cost(entry.get('cost_usd')):>10}")
+
+        cost_note = "" if summary["cost_usd"] is not None else " (cost omitted — no pricing configured, or no billable tasks run yet)"
+        click.echo(f"\nTotal: {summary['tasks_done']}/{summary['tasks_total']} tasks done, "
+                   f"{_format_duration(summary['duration_seconds'])} compute time, "
+                   f"{_format_cost(summary['cost_usd'])} API cost{cost_note}")
+        click.echo(f"In-pipeline span: {_format_span(summary['span_start'], summary['span_end'])}")
+        return
+
+    books_dir = Path(config.get("books_dir", "books"))
+    summaries = dashboard.portfolio_summary(books_dir)
+    if not summaries:
+        click.echo(f"No books found under {books_dir}/")
+        return
+
+    click.echo(f"Portfolio: {len(summaries)} book{'s' if len(summaries) != 1 else ''}\n")
+    click.echo(f"{'Book':<20}  {'Tasks done':<12}  {'API cost':<12}  {'Compute time':<14}  {'In-pipeline span'}")
+    for s in summaries:
+        done_str = f"{s['tasks_done']}/{s['tasks_total']}"
+        click.echo(f"{s['slug']:<20}  {done_str:<12}  {_format_cost(s['cost_usd']):<12}  "
+                   f"{_format_duration(s['duration_seconds']):<14}  {_format_span(s['span_start'], s['span_end'])}")
+
+    total_done = sum(s["tasks_done"] for s in summaries)
+    known_costs = [s["cost_usd"] for s in summaries if s["cost_usd"] is not None]
+    total_cost = sum(known_costs) if known_costs else None
+    total_duration = sum(s["duration_seconds"] for s in summaries)
+    avg_cost = (total_cost / len(known_costs)) if known_costs else None
+    avg_duration = total_duration / len(summaries) if summaries else 0
+
+    click.echo(f"\nTotals: {_format_cost(total_cost)} API cost, {total_done} tasks completed, "
+               f"avg {_format_cost(avg_cost)}/title, avg compute time {_format_duration(avg_duration)}/title")
+
+
+cli.add_command(s3)
 
 
 # ---------------------------------------------------------------------------

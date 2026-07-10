@@ -14,11 +14,24 @@ llm:
   # (cleanup, ortho, copyedit) where fidelity to the source text matters more
   # than fluency. Raise it only if output feels too rigid.
   temperature: 0.0
+  # Optional — System 3's `s3 dashboard` (ADR 005) uses this to turn captured
+  # token counts into a cost figure. Omit this block entirely to skip cost
+  # calculation; duration and token counts are captured either way. Prices
+  # change over time and by account tier — these are illustrative placeholders
+  # only, not verified current figures. Confirm against your own Mistral
+  # account/plan before trusting the dashboard's cost column.
+  pricing:
+    prompt_per_million: 0.40
+    completion_per_million: 2.00
 
 translation:
   provider: deepl
   source_lang: EN
   target_lang: ES
+  # Optional, same caveat as llm.pricing above — DeepL Pro API pricing is
+  # per-character; confirm your own plan's current rate before trusting it.
+  pricing:
+    per_million_characters: 20.00
 
 books_dir: books
 

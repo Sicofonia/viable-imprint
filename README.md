@@ -32,7 +32,7 @@ The pipeline is organised in four layers:
 
 **`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods.
 
-**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, and the System 2 task-graph orchestrator (`lib/orchestrator.py`).
+**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), and the System 3 dashboard aggregation (`lib/dashboard.py`).
 
 **`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by eleven different tasks across three systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all), `feed_scan` (pull new items from a curated watchlist of external sources — RSS/Atom feeds, Project Gutenberg's bulk catalog, and an imprint's own catalog page — no LLM call). Engines are written once and reused by any task that needs that shape of work.
 
@@ -45,6 +45,8 @@ The pipeline is organised in four layers:
 Adding a new LLM-driven editorial task to a system requires writing a prompt file and adding a few lines to that system's `tasks.yaml` — no Python. The CLI itself is built dynamically from these manifests at startup (see `lib/task_loader.py`), so `pipeline.py <system> --help` always reflects whatever that system is currently configured to do.
 
 **`pipeline.py s2`** is the one command group that isn't manifest-driven — System 2 (Coordination) doesn't declare its own tasks, it coordinates the ones System 1B and System 1D already declare. It reads every book-scoped `tasks.yaml` to build a cross-system task graph (each task's `input:` field, or positional chaining within a system when `input:` is absent) and checks it against a run-state ledger recorded in the book's own `manifest.yaml`. `pipeline.py s2 status <book>` shows what's done, ready, or blocked (and why); `pipeline.py s2 run <book>` runs every currently-unblocked task, across both systems, until nothing further is unblocked — turning thirteen hand-typed commands into one. See `docs/adr/004-system-2-run-orchestration.md`.
+
+**`pipeline.py s3`** is System 3 (Performance Monitoring) — also hand-written, also read-only. Every task run (manual or via `s2 run`) now records its duration, and — for the two engines that call an external provider (`llm_text`, `translation`) — token/character usage, provider, model, and an optional cost in USD, right alongside its `s2` ledger entry. `pipeline.py s3 dashboard` shows a portfolio-wide summary across every book; `pipeline.py s3 dashboard <book>` breaks one book down task by task. Cost is opt-in: it's only computed when you've filled in an optional `pricing:` block in `config.yaml` (illustrative placeholders ship in `config.example.yaml` — verify against your actual plan before trusting the numbers); duration and raw usage are captured either way. This is deliberately scoped to *reporting* only — no resource allocation, budget tracking, or pricing decisions, which stay a human call. See `docs/adr/005-system-3-performance-monitoring.md`.
 
 **Every task's output lands under the VSM system that produced it** (`s1b/`, `s1d/`), mirroring the CLI's own nested command structure (`pipeline.py s1b <task>`, `pipeline.py s1d <task>`) — a book's folder never mixes editorial-production output with marketing output at the same level. `manifest.yaml` is the one exception, staying at the book root since it's shared across every system. Cross-system chaining still works exactly as you'd expect: `s1d brief`, for instance, reads from `s1b/copyedit/es/`, and its own output lands under `s1d/`, not `s1b/`.
 
@@ -73,7 +75,7 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 - `format_styles.yaml` — `format` doesn't build a document from scratch; it loads your own `.odt` template (page setup, margins, and named paragraph styles already defined) and appends the manuscript to it, using your template's own style names. This file maps a small set of structural roles — `chapter_number`, `chapter_title`, `first_paragraph`, `body` — to whatever you've actually named those styles in your template. Chapter structure is detected directly from the text (a short, all-uppercase line containing a roman numeral or digit is the chapter number; an immediately following short uppercase line is the title) — no markup tags required. Inline `[i]`/`[sc]`/`[FN: ...]` markup is left as plain visible text in the output by design; applying that formatting is a manual step.
 - `marketing_metadata.yaml` — bibliographic and contact facts (author, ISBN, price, launch date, email, links...) for a single book, grouped into named blocks. `s1d press-dossier` and `s1d metadata` read this; neither ever asks an LLM to guess a fact that belongs here. Add, rename, or drop blocks freely — see `lib/metadata_blocks.py` and `docs/adr/002-marketing-brief-pipeline.md` for how a prompt requests a block by name.
 
-Each book lives in its own folder under `books/`. A `manifest.yaml` in each folder records which files have been processed, by which provider and model, so the record travels with the text. It also carries a `tasks:` block — the System 2 run-state ledger, keyed as `<system>.<task-name>` (e.g. `s1b.cleanup`, `s1d.brief`), recording each task's status (`done`/`failed`), output path, and timestamp. This is written automatically by every task run, whether invoked manually (`s1b cleanup <file>`) or through `s2 run` — it's what `s2 status`/`s2 run` read to know what's already done.
+Each book lives in its own folder under `books/`. A `manifest.yaml` in each folder records which files have been processed, by which provider and model, so the record travels with the text. It also carries a `tasks:` block — the System 2 run-state ledger, keyed as `<system>.<task-name>` (e.g. `s1b.cleanup`, `s1d.brief`), recording each task's status (`done`/`failed`), output path, and timestamp. This is written automatically by every task run, whether invoked manually (`s1b cleanup <file>`) or through `s2 run` — it's what `s2 status`/`s2 run` read to know what's already done. Since ADR 005, each entry also carries `duration_seconds`, and — for tasks whose engine calls an external provider — `provider`, `model`, `usage` (tokens or characters), and `cost_usd` (`null` if no pricing is configured); this is what `s3 dashboard` reads.
 
 ```
 books/
@@ -169,6 +171,8 @@ DEEPL_API_KEY=your-deepl-key-here
 
 Keys must be unquoted and have no trailing spaces. DeepL free-plan keys end in `:fx` — paste them as-is and the client routes to the correct endpoint automatically.
 
+Optionally, fill in the `pricing:` blocks under `llm:`/`translation:` in `config.yaml` with your actual per-provider rates to enable `s3 dashboard`'s cost column (System 3, ADR 005) — leave them out and it still works, just without a dollar figure.
+
 **4. Add your task prompts**
 
 Task prompts are personal editorial content — they encode your house style, language, and rules — so they are gitignored and not committed to this repository. Only the reference prompts in `prompts/examples/` ship with the project. Create your own by copying the examples and editing them:
@@ -239,6 +243,15 @@ uv run python pipeline.py s2 run life-as-explorer       # run every currently-re
 ```
 
 `s2 run` resolves each task's input from whatever the previous task produced (no retyping file paths), runs everything currently unblocked, and stops once nothing further is unblocked — independent tasks (e.g. System 1D's seven deliverables, which all read `brief`, not each other) keep going even if one of them fails; a failed task is simply retried the next time you run `s2 run`. Add `--only s1b` to restrict to one system, or `--step` to run exactly one ready task and stop — useful for reviewing `s1d brief` by hand before letting the (paid) expansion calls fire. See `docs/adr/004-system-2-run-orchestration.md`.
+
+**Check what it cost:**
+
+```bash
+uv run python pipeline.py s3 dashboard                    # every book, compute time + API cost + in-pipeline span
+uv run python pipeline.py s3 dashboard life-as-explorer   # one book, broken down task by task
+```
+
+Every task run — manual or via `s2 run` — records its duration and, for tasks that call an LLM or translation provider, token/character usage automatically. The cost column only fills in once you've set a `pricing:` block under `llm:`/`translation:` in `config.yaml` (see Setup); until then, duration and usage still show, cost just reads `-`. This is read-only reporting, nothing here allocates resources or makes pricing decisions — see `docs/adr/005-system-3-performance-monitoring.md`.
 
 The rest of this section walks through the same pipeline one command at a time, useful for understanding what each step does or for rerunning a single one after a manual edit.
 

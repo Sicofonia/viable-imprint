@@ -39,4 +39,4 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     )
 
     click.echo(f"Saved: {output_file}")
-    return output_file
+    return output_file, {"usage": translator.usage}
