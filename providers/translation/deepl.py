@@ -6,6 +6,7 @@ from providers.translation.base import TranslationProvider
 class DeepLProvider(TranslationProvider):
     def __init__(self, api_key: str):
         self._translator = deepl.Translator(api_key)
+        self.usage = {"characters": 0}
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> str:
         """Translate while preserving [i] and [sc] markup.
@@ -23,6 +24,7 @@ class DeepLProvider(TranslationProvider):
             target_lang=target_lang.upper(),
             tag_handling="xml",
         )
+        self.usage["characters"] += result.billed_characters
 
         translated = result.text
         # Strip the <doc>…</doc> wrapper we added

@@ -9,6 +9,7 @@ class MistralProvider(LLMProvider):
         self._api_key = api_key
         self._model = model
         self._temperature = temperature
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     def complete(self, system_prompt: str, user_prompt: str, temperature: float = None) -> str:
         response = httpx.post(
@@ -28,4 +29,8 @@ class MistralProvider(LLMProvider):
             timeout=120.0,
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        data = response.json()
+        usage = data.get("usage", {})
+        for field in self.usage:
+            self.usage[field] += usage.get(field, 0)
+        return data["choices"][0]["message"]["content"]
