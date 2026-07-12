@@ -17,6 +17,10 @@ books/
 # folder per VSM system (prompts/s1b/, prompts/s1d/, ...); this pattern only
 # matches that one level, so prompts/examples/<system>/ stays tracked.
 /prompts/*/*_task.txt
+# Exception: System 5's real prompt is substantively the same content already
+# public in docs/vsm.md, so gitignoring it wouldn't protect anything — see
+# docs/adr/006-system-5-policy-agent.md, point 7.
+!/prompts/s5/policy_evaluation_task.txt
 
 # Book design templates and their style mapping are specific to one imprint —
 # only the .example.yaml reference ships with the project.
@@ -28,3 +32,8 @@ books/
 # sensitive — same treatment as books/. Only sources.example.yaml is committed.
 /intelligence/
 /systems/s4/sources.yaml
+
+# System 5's candidates-under-evaluation folder — same treatment as books/
+# and intelligence/: personal/business-sensitive working data, not committed.
+# See docs/adr/006-system-5-policy-agent.md.
+/candidates/

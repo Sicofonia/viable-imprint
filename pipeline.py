@@ -29,7 +29,7 @@ import click
 import yaml
 from dotenv import load_dotenv
 
-from lib import dashboard, orchestrator
+from lib import dashboard, orchestrator, paths
 from lib.task_loader import build_system_group
 
 load_dotenv()  # reads .env into os.environ before any provider is instantiated
@@ -105,6 +105,7 @@ def init(ctx, book_slug):
 cli.add_command(build_system_group("s1b", "System 1B — Editorial Production"))
 cli.add_command(build_system_group("s1d", "System 1D — Publication and Marketing"))
 cli.add_command(build_system_group("s4", "System 4 — Strategic Intelligence"))
+cli.add_command(build_system_group("s5", "System 5 — Identity, Values and Policy"))
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +282,36 @@ def s3_dashboard(ctx, book_slug):
 
 
 cli.add_command(s3)
+
+
+# ---------------------------------------------------------------------------
+# candidate new — bootstrap for a text under System 5 policy evaluation.
+# Pure scaffolding, like `init`: it creates a folder and a manifest, nothing
+# more. It does no System 1A work (identifying, sourcing, or assessing a
+# candidate) — a human still does all of that; this just makes room for the
+# result. See docs/adr/006-system-5-policy-agent.md.
+# ---------------------------------------------------------------------------
+
+@click.group(name="candidate", help="Candidates under System 5 policy evaluation")
+def candidate():
+    pass
+
+
+@candidate.command(name="new")
+@click.argument("candidate_slug")
+@click.pass_context
+def candidate_new(ctx, candidate_slug):
+    """Create the candidates/ folder (if needed) and a place for this candidate's brief."""
+    root = paths.candidates_root(ctx.obj["config"])
+    briefs_dir = root / "s1a" / "briefs"
+    briefs_dir.mkdir(parents=True, exist_ok=True)
+    brief_path = briefs_dir / f"{candidate_slug}.txt"
+
+    click.echo(f"Write the candidate's description in: {brief_path}")
+    click.echo(f"Then run: pipeline.py s5 evaluate {brief_path}")
+
+
+cli.add_command(candidate)
 
 
 # ---------------------------------------------------------------------------

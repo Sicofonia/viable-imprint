@@ -30,6 +30,21 @@ def intelligence_root(config: dict) -> Path:
     return root
 
 
+def candidates_root(config: dict) -> Path:
+    """Return System 5's perpetual candidates-under-evaluation folder,
+    creating it (and its manifest.yaml) on first use — same shape as
+    `intelligence_root()`, for the same reason: a candidate text has no
+    editorial commitment behind it yet, so it doesn't belong under books_dir.
+    See docs/adr/006-system-5-policy-agent.md.
+    """
+    root = Path(config.get("candidates_dir", "candidates")).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "manifest.yaml"
+    if not manifest_path.exists():
+        manifest_path.write_text("slug: candidates\n", encoding="utf-8")
+    return root
+
+
 def stage_output_dir(input_file: Path, book_root: Path, system: str, output_stage: str) -> Path:
     """Return output directory for a task, nested under the VSM system that
     produces it (mirroring the CLI's own s1b/s1d grouping), and mirroring

@@ -39,3 +39,9 @@ books_dir: books
 # lives outside books_dir. Structured like a book internally (its own
 # manifest.yaml, s4/ subfolder) — see docs/adr/003-system-4-strategic-intelligence.md.
 intelligence_dir: intelligence
+
+# Root folder for candidates under System 5 policy evaluation (ADR 006) — not
+# book-scoped either, same reasoning as intelligence_dir: a text under
+# evaluation has no editorial commitment behind it yet, so it doesn't belong
+# under books_dir.
+candidates_dir: candidates
