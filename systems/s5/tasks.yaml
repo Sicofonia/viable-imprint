@@ -1,0 +1,7 @@
+tasks:
+  - name: evaluate
+    engine: llm_text
+    prompt: prompts/s5/policy_evaluation_task.txt
+    # A candidate brief is short prose (a paragraph or two), read in one
+    # call — not chunked like a manuscript.
+    max_chars: 100000

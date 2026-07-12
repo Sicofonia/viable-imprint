@@ -41,12 +41,15 @@ The pipeline is organised in four layers:
 - `systems/s1b/tasks.yaml` — System 1B (Editorial Production): cleanup, translate, ortho, copyedit, format
 - `systems/s1d/tasks.yaml` — System 1D (Publication and Marketing): brief, synopsis, story-map, one-pager, press-dossier, trailer-storyboard, goodreads-profile, metadata (see `docs/adr/002-marketing-brief-pipeline.md` for why marketing is a chain of small tasks rather than one big one)
 - `systems/s4/tasks.yaml` — System 4 (Strategic Intelligence): scan, briefing (see `docs/adr/003-system-4-strategic-intelligence.md`) — unlike S1B/S1D, System 4 isn't about any one book, so it doesn't live under `books/` at all; see below
+- `systems/s5/tasks.yaml` — System 5 (Identity, Values and Policy): evaluate (see `docs/adr/006-system-5-policy-agent.md`) — reads a candidate text's description and returns an advisory fit/borderline/reject verdict against the editorial policy in `docs/vsm.md`. Not book-scoped either; see below
 
 Adding a new LLM-driven editorial task to a system requires writing a prompt file and adding a few lines to that system's `tasks.yaml` — no Python. The CLI itself is built dynamically from these manifests at startup (see `lib/task_loader.py`), so `pipeline.py <system> --help` always reflects whatever that system is currently configured to do.
 
 **`pipeline.py s2`** is the one command group that isn't manifest-driven — System 2 (Coordination) doesn't declare its own tasks, it coordinates the ones System 1B and System 1D already declare. It reads every book-scoped `tasks.yaml` to build a cross-system task graph (each task's `input:` field, or positional chaining within a system when `input:` is absent) and checks it against a run-state ledger recorded in the book's own `manifest.yaml`. `pipeline.py s2 status <book>` shows what's done, ready, or blocked (and why); `pipeline.py s2 run <book>` runs every currently-unblocked task, across both systems, until nothing further is unblocked — turning thirteen hand-typed commands into one. See `docs/adr/004-system-2-run-orchestration.md`.
 
 **`pipeline.py s3`** is System 3 (Performance Monitoring) — also hand-written, also read-only. Every task run (manual or via `s2 run`) now records its duration, and — for the two engines that call an external provider (`llm_text`, `translation`) — token/character usage, provider, model, and an optional cost in USD, right alongside its `s2` ledger entry. `pipeline.py s3 dashboard` shows a portfolio-wide summary across every book; `pipeline.py s3 dashboard <book>` breaks one book down task by task. Cost is opt-in: it's only computed when you've filled in an optional `pricing:` block in `config.yaml` (illustrative placeholders ship in `config.example.yaml` — verify against your actual plan before trusting the numbers); duration and raw usage are captured either way. This is deliberately scoped to *reporting* only — no resource allocation, budget tracking, or pricing decisions, which stay a human call. See `docs/adr/005-system-3-performance-monitoring.md`.
+
+**`pipeline.py s5 evaluate`** is System 5 (Identity, Values and Policy) — the one manifest-driven task whose prompt is committed rather than gitignored, since it's substantively the same editorial policy already public in `docs/vsm.md`. It reuses `engines/llm_text.py` completely unchanged: the "policy agent" is just `vsm.md`'s System 5 section reformatted as a system prompt. Given a candidate's description (title, author, approximate date, subject, what's known about rights/source quality), it returns an advisory verdict — fits / borderline / doesn't fit — reasoned against the thematic scope and non-negotiable values in `docs/vsm.md`. It does **not** decide anything: no candidates database, no automatic book creation, nothing gated. **`pipeline.py candidate new <slug>`** is the bootstrap (mirroring `init`, but for a candidate rather than a book) — it does no System 1A work itself (identifying or sourcing a candidate is still entirely a human task today); it just creates the folder a brief goes in. See `docs/adr/006-system-5-policy-agent.md`, especially point 8, on why that distinction is worth keeping clear.
 
 **Every task's output lands under the VSM system that produced it** (`s1b/`, `s1d/`), mirroring the CLI's own nested command structure (`pipeline.py s1b <task>`, `pipeline.py s1d <task>`) — a book's folder never mixes editorial-production output with marketing output at the same level. `manifest.yaml` is the one exception, staying at the book root since it's shared across every system. Cross-system chaining still works exactly as you'd expect: `s1d brief`, for instance, reads from `s1b/copyedit/es/`, and its own output lands under `s1d/`, not `s1b/`.
 
@@ -67,8 +70,9 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 | `s1d metadata` | System 1D | Brief + `marketing_metadata.yaml` | Bibliographic reference sheet in `s1d/metadata/es/` — pure data assembly, no LLM call |
 | `s4 scan` | System 4 | Nothing (external sources per `systems/s4/sources.yaml`) | New items since the last scan in `intelligence/s4/scan/<date>/` — no LLM call, no book involved at all |
 | `s4 briefing` | System 4 | That day's scan | Strategic intelligence briefing in `intelligence/s4/briefing/<date>/` |
+| `s5 evaluate` | System 5 | A candidate's description in `candidates/s1a/briefs/` (create with `candidate new <slug>`) | Advisory fit/borderline/reject verdict in `candidates/s5/evaluate/` — no book involved, no automatic decision |
 
-**`prompts/`** — plain text task prompts for the LLM calls, one folder per VSM system (`prompts/s1b/`, `prompts/s1d/`, `prompts/s4/`) so prompts don't get lumped together as the project grows. Edit these to tune editorial behaviour without touching Python. The live prompts are gitignored, since they encode a specific imprint's editorial voice; only `prompts/examples/<system>/` is committed, as reference material. See Setup below.
+**`prompts/`** — plain text task prompts for the LLM calls, one folder per VSM system (`prompts/s1b/`, `prompts/s1d/`, `prompts/s4/`) so prompts don't get lumped together as the project grows. Edit these to tune editorial behaviour without touching Python. The live prompts are gitignored, since they encode a specific imprint's editorial voice; only `prompts/examples/<system>/` is committed, as reference material. **`prompts/s5/policy_evaluation_task.txt` is the one exception — it's committed**, since it's substantively the same editorial policy already public in `docs/vsm.md`, not personal-but-unpublished editorial voice; see `docs/adr/006-system-5-policy-agent.md`, point 7. See Setup below.
 
 **`templates/`** holds two independent things, both gitignored (only their `.example` counterparts are committed):
 
@@ -118,6 +122,21 @@ intelligence/
 ```
 
 See `docs/adr/003-system-4-strategic-intelligence.md` for why System 4 needed this rather than fitting the book-scoped shape S1B/S1D use, and for the reliability lessons that shaped `scan`'s output format (worth reading before writing a new prompt whose input is `scan`'s output).
+
+**A text under System 5 evaluation isn't a book either** — there's no editorial commitment to acquire it yet, so it doesn't belong under `books/`. `pipeline.py candidate new <slug>` creates a perpetual `candidates/` folder at the repo root (gitignored like `books/`/`intelligence/`), structured like a book internally for the same reason System 4's `intelligence/` is:
+
+```
+candidates/
+├── manifest.yaml
+├── s1a/
+│   └── briefs/
+│       └── <candidate-slug>.txt      # you write this by hand
+└── s5/
+    └── evaluate/
+        └── <candidate-slug>.txt      # the verdict
+```
+
+`s1a/briefs/` is a landing spot for the brief, not evidence that System 1A is implemented — identifying and sourcing a candidate is still entirely manual today. See `docs/adr/006-system-5-policy-agent.md`, point 8, for why that line is worth keeping clear.
 
 ---
 
@@ -334,6 +353,20 @@ uv run python pipeline.py s4 scan && uv run python pipeline.py s4 briefing intel
 ```
 
 `scan` is resilient to a single source failing (a feed timing out, a site returning an error) — it warns and continues with the rest rather than aborting the whole run. See `docs/adr/003-system-4-strategic-intelligence.md` for the full design, including why Project Gutenberg needed its bulk catalog file rather than its RSS feed, and several further prompt-reliability lessons beyond the ones ADR 002 already found.
+
+**Get a first-pass opinion on whether a candidate text fits your catalogue (System 5):**
+
+```bash
+uv run python pipeline.py candidate new life-of-a-nomad
+```
+
+This tells you where to write the candidate's description — title, author, approximate date, language, a paragraph on subject/scope, and whatever you know about its copyright status and source quality. It's free-form prose, not a rigid form. Then:
+
+```bash
+uv run python pipeline.py s5 evaluate candidates/s1a/briefs/life-of-a-nomad.txt
+```
+
+This writes a verdict (fits / borderline / doesn't fit) to `candidates/s5/evaluate/life-of-a-nomad.txt`, reasoned against the editorial policy in `docs/vsm.md`. It's advisory only — nothing here creates a book, updates a database, or decides anything for you; if you agree with the verdict and want to proceed, run `pipeline.py init life-of-a-nomad` yourself, same manual step as always. See `docs/adr/006-system-5-policy-agent.md`, and note point 8 in particular: this doesn't automate finding or vetting candidates, only checking one you've already found against policy.
 
 ---
 
