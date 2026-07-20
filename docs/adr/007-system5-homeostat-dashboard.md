@@ -1,6 +1,6 @@
 # ADR 007 — System 5: Homeostat Dashboard (S3/S4 Confrontation)
 
-**Status:** Proposed. Not yet implemented — for review before work starts.
+**Status:** Implemented. Built and tested end-to-end against real S3 data (a disposable scratch book), a real S4 briefing, real Mistral calls, and a deliberately-forced failure — see "Implementation notes" for a significant, project-wide bug found and fixed along the way, plus one prompt-wording fix and one rendering fix.
 
 ---
 
@@ -230,17 +230,42 @@ A generic "project registry" (formalizing "book" and "homeostat" as two named, p
 
 ---
 
+## Implementation notes (2026-07-20)
+
+Built and tested end-to-end: a disposable scratch book (`books/s5-homeostat-scratch/`, one real `s1b cleanup` call for genuine S3 cost/duration data), the real S4 briefing already on disk from earlier testing (`intelligence/s4/briefing/2026-07-04/`), real Mistral calls for the synthesis step, a real logged decision, and a deliberately forced failure. Scratch book deleted afterward, not committed.
+
+### 8. A significant, project-wide bug found while testing this ADR's own prompt: `load_prompt()` was silently deleting every literal Markdown heading from every fill-in-template prompt in the project
+
+First real run of `homeostat` produced output with no `##` headings at all — instead, each section opened with the *bracketed instruction text itself*, verbatim, followed by real analysis below it. Strengthening the prompt's wording twice (naming the exact failure, forbidding it explicitly) made no difference — a strong signal this wasn't a model-compliance problem at all.
+
+Root cause, confirmed by printing exactly what `lib.paths.load_prompt()` sends to the model: its comment-stripping (`if not line.startswith("#")`, intended to drop a maintainer's leading `# ...` header comment) strips **every** line starting with `#`, anywhere in the file — including every `## Heading` line in the template itself, since those also start with `#`. The model was never shown any heading text at all; it was working purely from the surrounding prose and improvising plausible section openers.
+
+This is not new to this ADR — checked directly, and it affects `prompts/s4/briefing_task.txt` and `prompts/s5/policy_evaluation_task.txt` identically (confirmed by running the same `load_prompt()` call against both and inspecting the output: their `##` lines are missing too). It reframes some of this project's own prior "prompt reliability" history: `s4 briefing`'s headings were never actually being "reproduced from a template" — the model has been improvising them from context this whole time, which is the more likely explanation for ADR 003 point 7's finding that heading *wording* kept varying run to run even after the bracket/tag fixes. `s5 evaluate`'s fix (ADR 006 point 10 — restating the required headings verbatim inside a `-`-prefixed RULES bullet, which doesn't start with `#`) happened to work *around* this bug by delivering the heading text through a surviving line, not by making the template's own heading lines reach the model.
+
+**Fixed at the root**, not worked around again: `load_prompt()` now only strips a *leading* block of comment lines (stopping at the first line that isn't blank and doesn't start with `#`), so a maintainer header comment at the top of a file is still stripped, but a `##` heading appearing later — the prompt's own literal content — reaches the model untouched. Verified against `prompts/s4/briefing_task.txt` (no leading comment, nothing stripped, all headings now reach the model), `prompts/s5/policy_evaluation_task.txt` (leading comment block correctly stripped, headings preserved), and the new `prompts/s5/homeostat_task.txt`. This is a project-wide correctness fix with implications beyond this ADR — every existing fill-in-template prompt will now show the model its real heading text for the first time, which should only improve reliability, but a broader regression pass across `s1d`'s and `s4`'s existing prompts is worth doing at some point rather than assumed risk-free everywhere. Logged in `feedback-llm-prompt-reliability` memory as a new, foundational finding.
+
+### 9. Even with the bug fixed, one more prompt-wording fix was needed
+
+Before finding the `load_prompt()` bug, two rounds of prompt-strengthening were tried and failed to change the output at all (expected in hindsight — the headings genuinely weren't reaching the model, no amount of RULES-section wording about "reproducing" text the model never saw was going to help). After the fix, headings appeared, but the wording added in those attempts (an explicit "don't copy the bracketed instruction as content" rule, and a note that the embedded S4 briefing has its own unrelated `##` headings not to imitate) turned out to still be worth keeping — re-running confirmed clean, correct output with all three headings and no repeated bracket text. Left in place rather than trimmed back to a minimal prompt, since it cost nothing and reinforces exactly the failure mode that was actually observed once, however it was caused.
+
+### 10. Heading-nesting fix in `_markdown_lite_to_html`
+
+First real render showed the embedded S4 briefing's own `# Informe de Inteligencia Estratégica` title landing at `<h2>`, the same level as the page's own `<h2>` section header directly above it ("Último briefing de System 4") — a flat, inconsistent-looking hierarchy, since `homeostat`'s own `##`-only content correctly nested one level deeper. Fixed by changing the heading offset from `+1` to `+2`: a document's `#` title now lands at `<h3>` (one level under the page's section header) and its `##` subsections at `<h4>`, consistent regardless of whether the embedded document has a title line or not.
+
+---
+
 ## Implementation Checklist
 
-- [ ] Add `homeostat_dir: homeostat` to `config.example.yaml` (and the user's real `config.yaml`), mirroring `intelligence_dir`/`candidates_dir`
-- [ ] Add `paths.homeostat_root(config)` to `lib/paths.py`, mirroring `intelligence_root()`/`candidates_root()`
-- [ ] Create `engines/homeostat_scan.py` (`CLI_ARG = "none"`): read `lib.dashboard.portfolio_summary()`, the latest `intelligence/s4/briefing/<date>/combined.txt`, and `homeostat/decisions.yaml`; write a dated `combined.txt` using `feed_scan._wrap_source()`-style `<fuente>` tags (or a locally duplicated equivalent)
-- [ ] Create `prompts/s5/homeostat_task.txt` (real, Spanish) and `prompts/examples/s5/homeostat_task.txt` (English reference) — fill-in-template per point 6
-- [ ] Create `engines/homeostat_render.py` (code only, no LLM call): reads the `homeostat` task's narrative output plus fresh S3/S4/decision data; renders a self-contained `homeostat.html` (inline CSS, inline SVG bar chart, bespoke Markdown-subset-to-HTML for the two embedded documents, a rendered decision-log table)
-- [ ] Add `homeostat-scan`, `homeostat`, `homeostat-render` to `systems/s5/tasks.yaml`
-- [ ] Add `pipeline.py s5 log-decision "<tension>" "<decision>"` (hand-written, appended to the `s5` group after `build_system_group()` returns it) — appends one entry to `homeostat/decisions.yaml` with today's date
-- [ ] Add `HOMEOSTAT_TASKS`, `run_homeostat()`, and `homeostat_status()` to `lib/orchestrator.py` (point 7) — additive, `run_book()`/`_load_graph()`/`BOOK_SYSTEMS` untouched
-- [ ] Add a `homeostat` subgroup under `s2` in `pipeline.py`: `s2 homeostat status`, `s2 homeostat run [--step]`
-- [ ] Add `/homeostat/` to `.gitignore`, alongside `/books/`, `/intelligence/`, `/candidates/`
-- [ ] End-to-end test: `s2 homeostat run` against real S3/S4 data (or realistic disposable fixtures if real data is thin) drives all three stages correctly in order; confirm a deliberate failure in `homeostat-scan` stops `homeostat`/`homeostat-render` from running; confirm running `s2 homeostat run` a second time produces a fresh dated snapshot rather than a no-op; log a test decision and confirm `s2 homeostat status` and a re-run of `homeostat-render` alone both reflect it without re-running the LLM step; open the resulting HTML in a browser and confirm it renders correctly with no network access
-- [ ] Update README with the System 5 homeostat section, the `s2 homeostat` commands, and the command reference table
+- [x] Add `homeostat_dir: homeostat` to `config.example.yaml` (and the user's real `config.yaml`), mirroring `intelligence_dir`/`candidates_dir`
+- [x] Add `paths.homeostat_root(config)` to `lib/paths.py`, mirroring `intelligence_root()`/`candidates_root()`
+- [x] Create `engines/homeostat_scan.py` (`CLI_ARG = "none"`): read `lib.dashboard.portfolio_summary()`, the latest `intelligence/s4/briefing/<date>/combined.txt`, and `homeostat/decisions.yaml`; write a dated `combined.txt` using the `<fuente>`-tag convention (`lib/homeostat.py` factors out the shared S4/decisions lookups, reused by the render step and `log-decision` too)
+- [x] Create `prompts/s5/homeostat_task.txt` (real, Spanish) and `prompts/examples/s5/homeostat_task.txt` (English reference) — fill-in-template per point 6; strengthened twice more during testing, see points 8–9
+- [x] Create `engines/homeostat_render.py` (code only, no LLM call): reads the `homeostat` task's narrative output plus fresh S3/S4/decision data; renders a self-contained `homeostat.html` (inline CSS, inline SVG bar chart, bespoke Markdown-subset-to-HTML for the two embedded documents, a rendered decision-log table)
+- [x] Add `homeostat-scan`, `homeostat`, `homeostat-render` to `systems/s5/tasks.yaml`
+- [x] Add `pipeline.py s5 log-decision "<tension>" "<decision>"` (hand-written, appended to the `s5` group after `build_system_group()` returns it) — appends one entry to `homeostat/decisions.yaml` with today's date
+- [x] Add `HOMEOSTAT_TASKS`, `run_homeostat()`, and `homeostat_status()` to `lib/orchestrator.py` (point 7) — additive, `run_book()`/`_load_graph()`/`BOOK_SYSTEMS` untouched
+- [x] Add a `homeostat` subgroup under `s2` in `pipeline.py`: `s2 homeostat status`, `s2 homeostat run [--step]`
+- [x] Add `/homeostat/` to `.gitignore`, alongside `/books/`, `/intelligence/`, `/candidates/`
+- [x] Fix `lib/paths.py`'s `load_prompt()` — a project-wide bug, not scoped to this ADR originally, but the actual root cause of this ADR's own first test failure; see point 8
+- [x] End-to-end test: `s2 homeostat run` against real S3 data (a disposable scratch book, one real `cleanup` call) and the real existing S4 briefing drove all three stages correctly; confirmed a deliberately forced failure (renamed the prompt file) stopped `homeostat`/`homeostat-render` from running and that restoring it let the chain complete cleanly; logged a real decision and confirmed both `s2 homeostat status` and a standalone re-run of `homeostat-render` reflected it without re-running the LLM step; read the resulting HTML directly and confirmed correct structure, table, chart, and heading nesting (point 10) — a human should still open it in an actual browser to confirm visually
+- [x] Update README with the System 5 homeostat section, the `s2 homeostat` commands, the `homeostat/` folder structure, and the command reference table
