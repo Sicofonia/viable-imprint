@@ -10,8 +10,11 @@ from lib import manifest, metrics, paths
 
 # "input" is reserved too: it's consumed by the System 2 orchestrator (ADR 004)
 # to resolve a task's default input from the run-state ledger, not passed
-# through to any engine.
-_RESERVED_KEYS = ("name", "engine", "output", "input")
+# through to any engine. "book_scoped" is consumed by the same orchestrator
+# (ADR 008) to exclude a periodic, non-book task declared inside a
+# book-scoped system's tasks.yaml (e.g. System 1D's newsletter trio) from
+# book production's task graph.
+_RESERVED_KEYS = ("name", "engine", "output", "input", "book_scoped")
 
 
 def load_system_tasks(system_name: str) -> list:

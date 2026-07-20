@@ -1,12 +1,12 @@
 # ADR 008 — System 1D: Monthly Newsletter (Explorer & Dish of the Month)
 
-**Status:** Proposed. Not yet implemented — for review before work starts.
+**Status:** Implemented. Built and tested end-to-end against real Mistral calls (two consecutive runs, plus a direct, forced repeat test) — worked correctly on the first real run, benefiting directly from lessons ADR 007 found the hard way. See "Implementation notes."
 
 ---
 
 ## Context
 
-Raised directly by the user: producing a monthly imprint newsletter — imprint news, an "explorer of the month" spotlight, and an "Asian dish of the month" cultural feature — currently consumes real manual time, and is a recurring task for this imprint (and, plausibly, others this project's audience runs). `docs/vsm.md` already names this under System 1D without needing to stretch the framework: its responsibilities list *"communication and marketing for each title (social media, newsletter, specialist communities)"* and its recurring tasks include *"publication on social media and newsletter around the launch."*
+Raised directly by the user: producing a monthly imprint newsletter — an "explorer of the month" spotlight, an "Asian dish of the month" cultural feature, and imprint news — currently consumes real manual time, and is a recurring task for this imprint (and, plausibly, others this project's audience runs). `docs/vsm.md` already names this under System 1D without needing to stretch the framework: its responsibilities list *"communication and marketing for each title (social media, newsletter, specialist communities)"* and its recurring tasks include *"publication on social media and newsletter around the launch."*
 
 **But structurally, it doesn't belong next to `brief`/`synopsis`/`one-pager`.** Every System 1D task built so far (ADR 002) is per-book, chained from one title's `brief`. A monthly imprint newsletter is calendar-driven and catalog-wide — the same shape System 4's `scan`/`briefing` and ADR 007's homeostat pipeline already are, not the shape the rest of System 1D is. So: **System 1D owns it conceptually; the code needs a fifth perpetual root** (`newsletter/`, after `books/`, `intelligence/`, `candidates/`, `homeostat/`), not a slot inside a book's folder.
 
@@ -98,10 +98,9 @@ def run(input_file, root, system, output_name, config, **params):
 
 Every prompt so far has been one or the other: fully Markdown headings (human-read only: `s4 briefing`, ADR 007's homeostat) or fully XML tags (code-parsed: `brief`). This prompt needs both at once — Markdown structure, because the raw output is meant to be read and eventually sent as-is; two embedded tags, because two specific values need exact code-side extraction. Nothing in this project's prompt-reliability history (ADR 002, ADR 003, ADR 006) has tested this exact combination.
 
-```
-## Noticias de la editorial
-[Novedades del mes: títulos que avanzaron en producción, hitos de distribución, cualquier nota proporcionada para este mes.]
+**Section order, per the user's explicit correction: explorer, then dish, then imprint news last** — not the order the first draft assumed.
 
+```
 ## Explorador del mes
 <explorer>Nombre completo</explorer>
 [Biografía breve — 2-3 párrafos — y por qué encaja con el catálogo de la editorial.]
@@ -109,6 +108,9 @@ Every prompt so far has been one or the other: fully Markdown headings (human-re
 ## Plato del mes: cocina de Asia y Asia Central
 <dish>Nombre del plato</dish>
 [Breve descripción del plato, su origen, y su conexión con la región que cubre la editorial.]
+
+## Noticias de la editorial
+[Novedades del mes: títulos que avanzaron en producción, hitos de distribución, cualquier nota proporcionada para este mes.]
 ```
 
 Flagged explicitly rather than assumed to work first try — expect this may need the same kind of iteration ADR 003's `briefing` prompt needed (three rounds beyond the ADR 002 baseline) before the tags reliably survive alongside the headings. Budgeted for in the Implementation Checklist, not treated as a risk to design around speculatively before real testing shows what actually breaks.
@@ -180,16 +182,34 @@ pipeline.py s2 newsletter run [--step]
 
 ---
 
+## Implementation notes (2026-07-20)
+
+Built and tested end-to-end: a disposable scratch book (`books/s1d-newsletter-scratch/`, one real `s1b cleanup` call for genuine this-month S3 activity), real Mistral calls for two consecutive newsletter drafts, a real monthly notes file, and a directly-forced repeat test. Scratch book and the test `newsletter/` folder deleted afterward, not committed.
+
+### 8. The prompt worked correctly on the *first* real run — a direct payoff of ADR 007's findings, applied proactively instead of rediscovered
+
+Unlike `homeostat_task.txt`, which needed the `load_prompt()` bug fix plus two rounds of wording changes before it held, `newsletter_task.txt` was written *after* that bug was already fixed and with its lessons already folded in from the start: an explicit "don't copy the bracketed instruction text as content" rule, and a rule warning that the input blocks carry their own headings/lists not to imitate. First real run produced correctly ordered headings (`## Explorador del mes`, `## Plato del mes...`, `## Noticias de la editorial` — matching the corrected order from this ADR's own review) with clean `<explorer>`/`<dish>` tags in the right places and no copied bracket text. No iteration needed. This is the payoff the `feedback-llm-prompt-reliability` memory's Rule 0 update was written for: check what actually reaches the model, and once a lesson is known, apply it proactively to the next prompt rather than waiting to hit the same failure again.
+
+### 9. Non-repetition verified for real, both directions
+
+Ran the full chain twice in succession (no month boundary needed — the tracking files themselves are what the second run had to avoid): the first run chose Nicolai Przhevalski / Lagman; with a notes file added and both names now tracked, the second run correctly chose different ones (Aurel Stein / Manti) without being told to explicitly avoid the first run's specific choices — the exclusion lists in the prompt's input were enough. Separately, forced a direct repeat by crafting a fake draft with `<explorer>Aurel Stein</explorer>` (already tracked) and running `s1d newsletter-track` against it directly: correctly warned (*"'Aurel Stein' appears to repeat a previous explorer of the month"*), did not crash, did not duplicate the tracking entry, and still recorded the accompanying new dish (`<dish>Palov</dish>`) normally — confirming the two checks are independent, matching the design.
+
+### 10. Stop-on-failure confirmed the same way ADR 007's was
+
+Temporarily renamed `prompts/s1d/newsletter_task.txt` mid-chain: `newsletter-scan` ran (unconditional, as designed), `newsletter` failed with a clear `Prompt file not found` error, and `newsletter-track` correctly never attempted. Restoring the prompt and re-running completed the chain cleanly on the next `s2 newsletter run` — no manual ledger cleanup needed, matching `run_homeostat()`'s exact behavior since `run_newsletter()` is structurally identical.
+
+---
+
 ## Implementation Checklist
 
-- [ ] Add `newsletter_dir: newsletter` to `config.example.yaml`/`config.yaml`; add `paths.newsletter_root(config)` to `lib/paths.py`
-- [ ] Add `book_scoped` to `task_loader.py`'s `_RESERVED_KEYS`; filter on it (default `True`) in `orchestrator._load_graph()` (point 6)
-- [ ] Create `engines/newsletter_scan.py` (`CLI_ARG = "none"`): filter `lib.dashboard.portfolio_summary()` by current-month activity, read this month's notes file (warn-and-continue if absent), read both tracking files; write tag-delimited `combined.txt`
-- [ ] Create `prompts/s1d/newsletter_task.txt` (real, Spanish) and `prompts/examples/s1d/newsletter_task.txt` (English reference) per point 4
-- [ ] Create `engines/newsletter_track.py`: extract `<explorer>`/`<dish>`, check + update `featured_explorers.yaml`/`featured_dishes.yaml` (warn, don't fail, on a repeat), write the tag-stripped final copy
-- [ ] Add `newsletter-scan`, `newsletter`, `newsletter-track` to `systems/s1d/tasks.yaml` (all `book_scoped: false`)
-- [ ] Add `NEWSLETTER_TASKS`, `run_newsletter()`, `newsletter_status()` to `lib/orchestrator.py`, mirroring ADR 007's homeostat functions
-- [ ] Add a `newsletter` subgroup under `s2` in `pipeline.py`: `s2 newsletter status`, `s2 newsletter run [--step]`
-- [ ] Add `/newsletter/` to `.gitignore`, alongside the other four perpetual roots
-- [ ] End-to-end test: run against real (or realistic disposable) data for two consecutive months; confirm the second month's exclusion lists correctly steer the model away from the first month's explorer/dish; deliberately force a repeat (e.g. an exhausted or narrow test policy) and confirm `newsletter-track` warns rather than crashing; confirm the final copy has no visible tag markup; iterate the prompt per point 4 until headings and tags both hold reliably across at least two real runs
-- [ ] Update README with the System 1D newsletter section, the `s2 newsletter` commands, and the command reference table
+- [x] Add `newsletter_dir: newsletter` to `config.example.yaml`/`config.yaml`; add `paths.newsletter_root(config)` to `lib/paths.py`
+- [x] Add `book_scoped` to `task_loader.py`'s `_RESERVED_KEYS`; filter on it (default `True`) in `orchestrator._load_graph()` (point 6) — verified `pipeline.py s2 status test` still lists exactly System 1D's eight book-scoped tasks, unchanged
+- [x] Create `engines/newsletter_scan.py` (`CLI_ARG = "none"`): filter `lib.dashboard.portfolio_summary()` by current-month activity, read this month's notes file (warn-and-continue if absent), read both tracking files; write tag-delimited `combined.txt`
+- [x] Create `prompts/s1d/newsletter_task.txt` (real, Spanish) and `prompts/examples/s1d/newsletter_task.txt` (English reference) per point 4 — corrected section order (explorer, dish, news) applied before writing, not after; worked first try, see point 8
+- [x] Create `engines/newsletter_track.py`: extract `<explorer>`/`<dish>`, check + update `featured_explorers.yaml`/`featured_dishes.yaml` (warn, don't fail, on a repeat), write the tag-stripped final copy
+- [x] Add `newsletter-scan`, `newsletter`, `newsletter-track` to `systems/s1d/tasks.yaml` (all `book_scoped: false`)
+- [x] Add `NEWSLETTER_TASKS`, `run_newsletter()`, `newsletter_status()` to `lib/orchestrator.py`, mirroring ADR 007's homeostat functions
+- [x] Add a `newsletter` subgroup under `s2` in `pipeline.py`: `s2 newsletter status`, `s2 newsletter run [--step]`
+- [x] Add `/newsletter/` to `.gitignore`, alongside the other four perpetual roots
+- [x] End-to-end test: ran two consecutive real drafts (confirming non-repetition without needing to fake a month boundary — see point 9); directly forced a repeat via a crafted fake draft and confirmed the warn-don't-crash path; confirmed the final copy has no visible tag markup in either real run; confirmed a forced mid-chain failure (renamed prompt) stopped `newsletter-track` from running and that restoring it let the chain complete cleanly (point 10)
+- [x] Update README with the System 1D newsletter section, the `s2 newsletter` commands, the `newsletter/` folder structure, and the command reference table

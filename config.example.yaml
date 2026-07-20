@@ -50,3 +50,8 @@ candidates_dir: candidates
 # confrontation dashboard. Not book-scoped, same reasoning as intelligence_dir
 # and candidates_dir.
 homeostat_dir: homeostat
+
+# Root folder for System 1D's monthly newsletter pipeline (ADR 008) — not
+# book-scoped either: calendar-driven and catalog-wide, same reasoning as
+# intelligence_dir/candidates_dir/homeostat_dir.
+newsletter_dir: newsletter

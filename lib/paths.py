@@ -58,6 +58,20 @@ def homeostat_root(config: dict) -> Path:
     return root
 
 
+def newsletter_root(config: dict) -> Path:
+    """Return System 1D's perpetual monthly-newsletter folder, creating it
+    (and its manifest.yaml) on first use — same shape as `intelligence_root()`,
+    `candidates_root()`, and `homeostat_root()`. See
+    docs/adr/008-system1d-newsletter.md.
+    """
+    root = Path(config.get("newsletter_dir", "newsletter")).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "manifest.yaml"
+    if not manifest_path.exists():
+        manifest_path.write_text("slug: newsletter\n", encoding="utf-8")
+    return root
+
+
 def stage_output_dir(input_file: Path, book_root: Path, system: str, output_stage: str) -> Path:
     """Return output directory for a task, nested under the VSM system that
     produces it (mirroring the CLI's own s1b/s1d grouping), and mirroring
