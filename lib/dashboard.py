@@ -30,18 +30,24 @@ def book_summary(root: Path) -> dict:
     nothing's run yet, or no pricing is configured), and the in-pipeline span
     (earliest to latest `completed_at`) — a proxy for cycle time, not the
     full acquisition-to-shelf number `vsm.md` describes (see ADR 005, point 7).
+
+    Counts `stale` (ADR 009) alongside `done`: S2's `stale` means "no longer
+    trusted as current," which matters for readiness, not for S3's job here —
+    the compute time and API cost were genuinely incurred either way, and
+    excluding them the moment an upstream task re-runs would make a book's
+    reported spend silently drop.
     """
     ledger = _book_scoped_ledger(root)
-    done = [e for e in ledger.values() if e.get("status") == "done"]
+    completed = [e for e in ledger.values() if e.get("status") in ("done", "stale")]
 
-    known_costs = [e["cost_usd"] for e in done if e.get("cost_usd") is not None]
-    timestamps = sorted(e["completed_at"] for e in done if e.get("completed_at"))
+    known_costs = [e["cost_usd"] for e in completed if e.get("cost_usd") is not None]
+    timestamps = sorted(e["completed_at"] for e in completed if e.get("completed_at"))
 
     return {
         "slug": root.name,
-        "tasks_done": len(done),
+        "tasks_done": len(completed),
         "tasks_total": _total_task_count(),
-        "duration_seconds": round(sum(e.get("duration_seconds", 0) or 0 for e in done), 2),
+        "duration_seconds": round(sum(e.get("duration_seconds", 0) or 0 for e in completed), 2),
         "cost_usd": round(sum(known_costs), 6) if known_costs else None,
         "span_start": timestamps[0] if timestamps else None,
         "span_end": timestamps[-1] if timestamps else None,

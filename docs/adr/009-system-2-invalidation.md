@@ -1,6 +1,6 @@
 # ADR 009 — System 2: Ledger Invalidation (Stale Tasks and Edited Output)
 
-**Status:** Proposed. Not yet implemented — for review before work starts.
+**Status:** Implemented. Built and tested end-to-end against a real (disposable) scratch book — see "Implementation notes" for one design point confirmed by a real run and one unrelated pre-existing bug found and deliberately left alone.
 
 ---
 
@@ -171,15 +171,33 @@ This project has no test suite (every ADR's "Implementation notes" section docum
 
 ---
 
+## Implementation notes (2026-07-20)
+
+Built and tested end-to-end against a disposable scratch book (`books/s2-invalidation-scratch/`, a three-sentence dummy manuscript, created and deleted within this same session — not part of the repo).
+
+### 11. The cascade's `invalidated_by` traces to the root cause, not the immediate parent — confirmed as the more useful choice
+
+`cascade_invalidate(root, key)` stamps every transitively-downstream entry with the *original* triggering `key`, not each hop's immediate predecessor. Concretely, after re-running `s1b.cleanup`, `s1d.metadata` (four hops downstream: `cleanup` → `copyedit` → `brief` → `metadata`) shows `invalidated by s1b.cleanup`, not `invalidated by s1d.brief`. Seeing this in a real `s2 status` run confirmed it's the right call: naming the immediate parent would just push the "why" question one hop down the chain (`brief` is itself stale for the same reason) rather than answering it. Root-cause attribution answers it directly.
+
+### 12. `s3 dashboard` needed two small fixes beyond the ADR's own sketch, both about not silently dropping already-spent cost
+
+Real-run testing surfaced that `stale` also had to be threaded through System 3's reporting, not just System 2's own status/readiness — the ADR's Consequences section flagged this as a risk to audit (point labeled "needs care") but hadn't named the exact fix. Two call sites in the existing code filtered strictly on `status == "done"`: `lib/dashboard.py`'s `book_summary()` (the aggregate cost/duration/task-count numbers) and `pipeline.py`'s per-task `s3 dashboard <book>` breakdown table. Left unfixed, the moment any task went `stale`, its already-incurred API cost and compute time would have silently vanished from both — a book's *reported* spend dropping the instant an upstream fix triggered a cascade, even though the money was actually spent. Both now count `stale` alongside `done` for cost/duration/task-count purposes (S3's job — money spent, not currency validity), while `s2`'s own readiness logic is unaffected (`stale` still isn't `done` there, correctly). The per-task table also labels a stale row `(stale)` inline so the two totals stay legible together.
+
+### 13. A pre-existing, unrelated bug found and deliberately left alone
+
+While reading `s3 dashboard` output during testing (`12/16 tasks done`), the total looked wrong — the scratch book only has 13 book-scoped tasks (5 in `s1b`, 8 in `s1d`). `lib/dashboard.py`'s `_total_task_count()` sums *every* task in each book-scoped system's `tasks.yaml`, without applying the `book_scoped` filter `orchestrator._load_graph()` already uses — so it's been counting System 1D's three newsletter tasks (`book_scoped: false`, ADR 008) as part of every book's total since ADR 008 merged, inflating the denominator from 13 to 16 for every book, in every `s3 dashboard` view. This predates ADR 009 and has nothing to do with invalidation — a one-line fix (`if t.get("book_scoped", True)`), but out of scope here per this project's own precedent (ADR 004 point 10 handled an unrelated quirk the same way: named clearly, not silently fixed inside an unrelated ADR's diff).
+
+---
+
 ## Implementation Checklist
 
-- [ ] Add `mark_stale(book_dir, key, invalidated_by)` to `lib/manifest.py`; add the `"tasks" in kwargs` guard to `update()` (point 5)
-- [ ] Add `output_mtime=output_file.stat().st_mtime` to `_run_recorded()`'s success-path `record_task()` call in `lib/task_loader.py`
-- [ ] Add `_dependents_map()` and `cascade_invalidate(root, key)` to `lib/orchestrator.py` (point 2)
-- [ ] Call `cascade_invalidate()` from `_run_recorded()` via a local import, right after a successful `record_task(..., status="done", ...)` — comment explaining why the import is local, not top-level
-- [ ] Extend `book_status()`: generalize the existing `done` check to a `status` variable, add a `stale` branch (output, `invalidated_by`, `ready_to_rerun`) parallel to the existing `failed` branch, add `edited_since_run` to both `done` and `stale` rows via a new `_edited_since_run(root, entry)` helper
-- [ ] Add `"stale"` to `_summarize()`'s remaining-work status tuple
-- [ ] Update `pipeline.py`'s `s2 status` printer for the new `stale` row shape and the `edited_since_run` annotation
-- [ ] Audit `lib/dashboard.py` and `pipeline.py s3 dashboard` for any place that reads ledger `status` and would mishandle `"stale"` as something other than "done, but superseded"
-- [ ] End-to-end test against a disposable scratch book: run the full S1B/S1D graph to completion; re-run `s1b cleanup` and confirm `translate`/`ortho`/`copyedit`/`format` (and, cross-system, `s1d.brief` and all seven of its fan-out dependents) show `stale` with the correct `invalidated_by`; confirm `s2 run` re-walks and clears the whole stale chain in one call; hand-edit a `done` output file and confirm `s2 status` flags `edited_since_run` without changing its status or blocking anything; confirm a direct `manifest.update(root, tasks={...})` call raises
-- [ ] Update README (the `manifest.yaml`/ledger description, the System 2 section, and the `s2 status` example output) to document `stale` and `edited_since_run`
+- [x] Add `mark_stale(book_dir, key, invalidated_by)` to `lib/manifest.py`; add the `"tasks" in kwargs` guard to `update()` (point 5)
+- [x] Add `output_mtime=output_file.stat().st_mtime` to `_run_recorded()`'s success-path `record_task()` call in `lib/task_loader.py`
+- [x] Add `_dependents_map()` and `cascade_invalidate(root, key)` to `lib/orchestrator.py` (point 2)
+- [x] Call `cascade_invalidate()` from `_run_recorded()` via a local import, right after a successful `record_task(..., status="done", ...)` — comment explaining why the import is local, not top-level
+- [x] Extend `book_status()`: generalize the existing `done` check to a `status` variable, add a `stale` branch (output, `invalidated_by`, `ready_to_rerun`) parallel to the existing `failed` branch, add `edited_since_run` to both `done` and `stale` rows via a new `_edited_since_run(root, entry)` helper
+- [x] Add `"stale"` to `_summarize()`'s remaining-work status tuple
+- [x] Update `pipeline.py`'s `s2 status` printer for the new `stale` row shape and the `edited_since_run` annotation
+- [x] Audit `lib/dashboard.py` and `pipeline.py s3 dashboard` for any place that reads ledger `status` and would mishandle `"stale"` as something other than "done, but superseded" — found and fixed two (point 12); found one unrelated pre-existing bug, deliberately left alone (point 13)
+- [x] End-to-end test against a disposable scratch book: ran the full S1B/S1D graph to completion (12/13 tasks — `s1b.format` hit the same pre-existing local template-path quirk ADR 004 documented, unrelated); re-ran `s1b cleanup` and confirmed `translate`/`ortho`/`copyedit`/`format` and, cross-system, `s1d.brief` and all seven of its fan-out dependents showed `stale` with the correct `invalidated_by` (point 11); confirmed `s2 run` re-walked and cleared the whole stale chain in one call, including after a `--only s1b`-restricted run left the S1D half deliberately stale in between; hand-edited a `done` output file and confirmed `s2 status` flagged `edited_since_run` without changing status or blocking anything, and that the flag survived the entry's transition to `stale`; confirmed a direct `manifest.update(root, tasks={...})` call raises `ValueError`; scratch book deleted afterward, not committed
+- [x] Update README (the `manifest.yaml`/ledger description, the System 2 section, and the `s2 status` example output) to document `stale` and `edited_since_run`

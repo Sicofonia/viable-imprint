@@ -156,7 +156,7 @@ def s2():
 @click.argument("book_slug")
 @click.pass_context
 def s2_status(ctx, book_slug):
-    """Show every book-scoped task's status: done, ready, blocked, or failed."""
+    """Show every book-scoped task's status: done, stale, ready, blocked, or failed."""
     root = _resolve_book_root(ctx.obj["config"], book_slug)
     click.echo(f"Book: {book_slug} ({root})")
 
@@ -167,8 +167,12 @@ def s2_status(ctx, book_slug):
             click.echo(f"\n{_SYSTEM_LABELS[current_system]}")
 
         name = row["name"]
+        edited = " (edited since run)" if row.get("edited_since_run") else ""
         if row["status"] == "done":
-            click.echo(f"  [x] {name:<20} {row['output']}")
+            click.echo(f"  [x] {name:<20} {row['output']}{edited}")
+        elif row["status"] == "stale":
+            retry = "ready to rerun" if row["ready_to_rerun"] else "blocked"
+            click.echo(f"  [~] {name:<20} stale ({retry}) — invalidated by {row['invalidated_by']}{edited}")
         elif row["status"] == "ready":
             click.echo(f"  [ ] {name:<20} ready")
         elif row["status"] == "failed":
@@ -334,7 +338,7 @@ def s3_dashboard(ctx, book_slug):
         click.echo(f"Book: {book_slug}\n")
         click.echo(f"{'Task':<24}  {'Duration':>8}  {'Provider/Model':<32}  {'Usage':<22}  {'Cost':>10}")
         for key, entry in sorted(summary["tasks"].items()):
-            if entry.get("status") != "done":
+            if entry.get("status") not in ("done", "stale"):
                 continue
             provider_model = entry.get("model") or entry.get("provider") or "-"
             if entry.get("model") and entry.get("provider"):
@@ -346,7 +350,8 @@ def s3_dashboard(ctx, book_slug):
                 usage_str = f"{usage['characters']:,} characters"
             else:
                 usage_str = "-"
-            click.echo(f"{key:<24}  {_format_duration(entry.get('duration_seconds')):>8}  "
+            label = key if entry["status"] == "done" else f"{key} (stale)"
+            click.echo(f"{label:<24}  {_format_duration(entry.get('duration_seconds')):>8}  "
                        f"{provider_model:<32}  {usage_str:<22}  {_format_cost(entry.get('cost_usd')):>10}")
 
         cost_note = "" if summary["cost_usd"] is not None else " (cost omitted — no pricing configured, or no billable tasks run yet)"

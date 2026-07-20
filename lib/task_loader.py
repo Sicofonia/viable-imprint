@@ -53,6 +53,12 @@ def _run_recorded(run_fn, root: Path, system: str, name: str, config: dict):
     ADR 005. `lib.metrics.enrich()` turns raw usage into ledger fields
     (provider/model/cost_usd); tasks with no usage contribute none of those
     fields, only `duration_seconds`.
+
+    On success, also cascade-invalidates anything downstream that's still
+    marked `done` against what was just superseded (ADR 009) — the same
+    shared-hook reasoning as the rest of this function: this must happen
+    whether the task ran manually or via `s2 run`, so it lives here, not in
+    the orchestrator's own call path.
     """
     key = f"{system}.{name}"
     start = time.monotonic()
@@ -68,8 +74,16 @@ def _run_recorded(run_fn, root: Path, system: str, name: str, config: dict):
     manifest.record_task(
         root, key, status="done",
         output=str(output_file.relative_to(root)), completed_at=_now_iso(),
-        duration_seconds=duration, **metrics.enrich(raw_metrics, config),
+        duration_seconds=duration, output_mtime=output_file.stat().st_mtime,
+        **metrics.enrich(raw_metrics, config),
     )
+    # Local import, not top-level: lib.orchestrator already imports this
+    # module (for run_task()), so a top-level import here would be circular.
+    # By the time any task actually runs, both modules are fully loaded, so
+    # this resolves fine at call time. See ADR 009 — don't "fix" this into a
+    # top-level import without re-solving the cycle first.
+    from lib import orchestrator
+    orchestrator.cascade_invalidate(root, key)
     return output_file
 
 
