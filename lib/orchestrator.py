@@ -64,6 +64,40 @@ def _load_graph() -> list:
     return graph
 
 
+def _dependents_map() -> dict:
+    """Reverse of `_load_graph()`'s `depends_on` — key -> the keys that
+    directly declare it as their input. Used only for cascading staleness
+    (ADR 009); `_load_graph()` itself stays forward-looking for readiness
+    checks.
+    """
+    dm = {}
+    for node in _load_graph():
+        if node["depends_on"]:
+            dm.setdefault(node["depends_on"], []).append(f"{node['system']}.{node['task']['name']}")
+    return dm
+
+
+def cascade_invalidate(root: Path, key: str) -> None:
+    """After `key` completes, mark every task transitively downstream of it
+    (per the book task graph) `stale` if it was `done` — see ADR 009. A safe
+    no-op for any key outside the book graph (System 4, System 5's candidate
+    evaluation, the homeostat/newsletter periodic pipelines): those never
+    appear in `_dependents_map()` since `_load_graph()` never included them
+    to begin with (ADR 004 point 7, ADR 008's `book_scoped` filter) — and
+    they have no "already done" concept for staleness to mean anything
+    against regardless.
+    """
+    dependents = _dependents_map()
+    queue, seen = list(dependents.get(key, [])), set()
+    while queue:
+        dep_key = queue.pop(0)
+        if dep_key in seen:
+            continue
+        seen.add(dep_key)
+        manifest.mark_stale(root, dep_key, invalidated_by=key)
+        queue.extend(dependents.get(dep_key, []))
+
+
 def _source_file(root: Path):
     """The one file `s1b`'s first task reads, discovered by convention
     (`init` creates `s1b/source/`) rather than a ledger lookup — there is no
@@ -80,9 +114,25 @@ def _source_file(root: Path):
     return files[0], None
 
 
+def _edited_since_run(root: Path, entry: dict) -> bool:
+    """True if a `done`/`stale` entry's recorded output file has a different
+    mtime now than what was captured at completion (ADR 009) — an
+    informational signal that a human hand-edited it since (expected,
+    normal use of this human-in-the-loop pipeline), not a correctness
+    problem in itself. Never affects `status` or readiness.
+    """
+    output, recorded_mtime = entry.get("output"), entry.get("output_mtime")
+    if not output or recorded_mtime is None:
+        return False
+    output_path = root / output
+    return output_path.exists() and output_path.stat().st_mtime != recorded_mtime
+
+
 def book_status(root: Path) -> list:
-    """One row per task in the graph: done (with output), ready, blocked (with
-    reason), or failed (with the recorded error; still eligible for retry).
+    """One row per task in the graph: done (with output), stale (with the
+    task that invalidated it), ready, blocked (with reason), or failed (with
+    the recorded error; still eligible for retry). `done` and `stale` rows
+    also carry `edited_since_run` (ADR 009).
     """
     ledger = manifest.load(root).get("tasks", {})
     rows = []
@@ -91,9 +141,11 @@ def book_status(root: Path) -> list:
         name = task["name"]
         key = f"{system}.{name}"
         entry = ledger.get(key)
+        status = entry.get("status") if entry else None
 
-        if entry and entry.get("status") == "done":
-            rows.append({"system": system, "name": name, "status": "done", "output": entry["output"]})
+        if status == "done":
+            rows.append({"system": system, "name": name, "status": "done", "output": entry["output"],
+                         "edited_since_run": _edited_since_run(root, entry)})
             continue
 
         if depends_on is None:
@@ -103,7 +155,11 @@ def book_status(root: Path) -> list:
             reason = None if (dep_entry and dep_entry.get("status") == "done") else f"waiting on {depends_on}"
         ready = reason is None
 
-        if entry and entry.get("status") == "failed":
+        if status == "stale":
+            rows.append({"system": system, "name": name, "status": "stale", "output": entry.get("output"),
+                         "invalidated_by": entry.get("invalidated_by"), "ready_to_rerun": ready,
+                         "edited_since_run": _edited_since_run(root, entry)})
+        elif status == "failed":
             rows.append({"system": system, "name": name, "status": "failed",
                          "error": entry.get("error"), "ready_to_retry": ready})
         elif ready:
@@ -176,7 +232,7 @@ def run_book(root: Path, config: dict, only: str = None, step: bool = False) -> 
 
 
 def _summarize(root: Path, done: list, failed: list) -> dict:
-    remaining = [r for r in book_status(root) if r["status"] in ("ready", "blocked", "failed")]
+    remaining = [r for r in book_status(root) if r["status"] in ("ready", "blocked", "failed", "stale")]
     return {"done": done, "failed": failed, "complete": not remaining}
 
 
