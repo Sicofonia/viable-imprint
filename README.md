@@ -32,16 +32,16 @@ The pipeline is organised in four layers:
 
 **`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods.
 
-**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), and the System 3 dashboard aggregation (`lib/dashboard.py`).
+**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), the System 3 dashboard aggregation (`lib/dashboard.py`), and shared data access for the System 5 homeostat pipeline (`lib/homeostat.py` — finding System 4's latest briefing, reading/writing the decision log).
 
-**`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by eleven different tasks across three systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all), `feed_scan` (pull new items from a curated watchlist of external sources — RSS/Atom feeds, Project Gutenberg's bulk catalog, and an imprint's own catalog page — no LLM call). Engines are written once and reused by any task that needs that shape of work.
+**`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by twelve different tasks across three systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all), `feed_scan` (pull new items from a curated watchlist of external sources — RSS/Atom feeds, Project Gutenberg's bulk catalog, and an imprint's own catalog page — no LLM call), `homeostat_scan` (gather System 3/4/decision-log data into one file, no LLM call), `homeostat_render` (render the final self-contained dashboard HTML, no LLM call). Engines are written once and reused by any task that needs that shape of work.
 
 **`systems/`** — one subfolder per VSM system, each holding a single `tasks.yaml` manifest. Only systems with implemented tasks exist here; a system is added when its first task is written. Each manifest entry names a task, the engine it uses, and that engine's parameters (typically a prompt file):
 
 - `systems/s1b/tasks.yaml` — System 1B (Editorial Production): cleanup, translate, ortho, copyedit, format
 - `systems/s1d/tasks.yaml` — System 1D (Publication and Marketing): brief, synopsis, story-map, one-pager, press-dossier, trailer-storyboard, goodreads-profile, metadata (see `docs/adr/002-marketing-brief-pipeline.md` for why marketing is a chain of small tasks rather than one big one)
 - `systems/s4/tasks.yaml` — System 4 (Strategic Intelligence): scan, briefing (see `docs/adr/003-system-4-strategic-intelligence.md`) — unlike S1B/S1D, System 4 isn't about any one book, so it doesn't live under `books/` at all; see below
-- `systems/s5/tasks.yaml` — System 5 (Identity, Values and Policy): evaluate (see `docs/adr/006-system-5-policy-agent.md`) — reads a candidate text's description and returns an advisory fit/borderline/reject verdict against the editorial policy in `docs/vsm.md`. Not book-scoped either; see below
+- `systems/s5/tasks.yaml` — System 5 (Identity, Values and Policy): evaluate (see `docs/adr/006-system-5-policy-agent.md`) — reads a candidate text's description and returns an advisory fit/borderline/reject verdict against the editorial policy in `docs/vsm.md`. Not book-scoped either; see below. Also `homeostat-scan`, `homeostat`, `homeostat-render` (see `docs/adr/007-system5-homeostat-dashboard.md`) — a periodic S3/S4 confrontation dashboard, driven by `s2 homeostat run` rather than run by hand; see below
 
 Adding a new LLM-driven editorial task to a system requires writing a prompt file and adding a few lines to that system's `tasks.yaml` — no Python. The CLI itself is built dynamically from these manifests at startup (see `lib/task_loader.py`), so `pipeline.py <system> --help` always reflects whatever that system is currently configured to do.
 
@@ -50,6 +50,8 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 **`pipeline.py s3`** is System 3 (Performance Monitoring) — also hand-written, also read-only. Every task run (manual or via `s2 run`) now records its duration, and — for the two engines that call an external provider (`llm_text`, `translation`) — token/character usage, provider, model, and an optional cost in USD, right alongside its `s2` ledger entry. `pipeline.py s3 dashboard` shows a portfolio-wide summary across every book; `pipeline.py s3 dashboard <book>` breaks one book down task by task. Cost is opt-in: it's only computed when you've filled in an optional `pricing:` block in `config.yaml` (illustrative placeholders ship in `config.example.yaml` — verify against your actual plan before trusting the numbers); duration and raw usage are captured either way. This is deliberately scoped to *reporting* only — no resource allocation, budget tracking, or pricing decisions, which stay a human call. See `docs/adr/005-system-3-performance-monitoring.md`.
 
 **`pipeline.py s5 evaluate`** is System 5 (Identity, Values and Policy) — the one manifest-driven task whose prompt is committed rather than gitignored, since it's substantively the same editorial policy already public in `docs/vsm.md`. It reuses `engines/llm_text.py` completely unchanged: the "policy agent" is just `vsm.md`'s System 5 section reformatted as a system prompt. Given a candidate's description (title, author, approximate date, subject, what's known about rights/source quality), it returns an advisory verdict — fits / borderline / doesn't fit — reasoned against the thematic scope and non-negotiable values in `docs/vsm.md`. It does **not** decide anything: no candidates database, no automatic book creation, nothing gated. **`pipeline.py candidate new <slug>`** is the bootstrap (mirroring `init`, but for a candidate rather than a book) — it does no System 1A work itself (identifying or sourcing a candidate is still entirely a human task today); it just creates the folder a brief goes in. See `docs/adr/006-system-5-policy-agent.md`, especially point 8, on why that distinction is worth keeping clear.
+
+**`pipeline.py s2 homeostat`** drives System 5's other advisory artifact — the homeostat dashboard, Beer's System 3/4 conflict-arbitration role given a concrete shape (`docs/adr/007-system5-homeostat-dashboard.md`). Three tasks (`homeostat-scan` → `homeostat` → `homeostat-render`) gather System 3's portfolio snapshot, System 4's latest briefing, and a decision log into a single self-contained `homeostat.html` — no server, no scheduler, a plain HTML file you open in a browser. Unlike book production, this pipeline is periodic, not one-and-done: `s2 homeostat run` re-executes the whole chain every time, producing a fresh dated snapshot, rather than skipping steps already marked `done` the way `s2 run <book_slug>` does. `pipeline.py s5 log-decision "<tension>" "<decision>"` appends one line to the decision log the dashboard displays — the one genuinely human step, kept as a plain two-argument command rather than a form.
 
 **Every task's output lands under the VSM system that produced it** (`s1b/`, `s1d/`), mirroring the CLI's own nested command structure (`pipeline.py s1b <task>`, `pipeline.py s1d <task>`) — a book's folder never mixes editorial-production output with marketing output at the same level. `manifest.yaml` is the one exception, staying at the book root since it's shared across every system. Cross-system chaining still works exactly as you'd expect: `s1d brief`, for instance, reads from `s1b/copyedit/es/`, and its own output lands under `s1d/`, not `s1b/`.
 
@@ -71,6 +73,9 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 | `s4 scan` | System 4 | Nothing (external sources per `systems/s4/sources.yaml`) | New items since the last scan in `intelligence/s4/scan/<date>/` — no LLM call, no book involved at all |
 | `s4 briefing` | System 4 | That day's scan | Strategic intelligence briefing in `intelligence/s4/briefing/<date>/` |
 | `s5 evaluate` | System 5 | A candidate's description in `candidates/s1a/briefs/` (create with `candidate new <slug>`) | Advisory fit/borderline/reject verdict in `candidates/s5/evaluate/` — no book involved, no automatic decision |
+| `s5 homeostat-scan` | System 5 | Nothing (reads S3/S4/decisions directly) | Combined snapshot in `homeostat/s5/homeostat-scan/<date>/` — no LLM call |
+| `s5 homeostat` | System 5 | That scan | Tensions/tradeoffs narrative in `homeostat/s5/homeostat/<date>/` |
+| `s5 homeostat-render` | System 5 | That narrative + fresh S3/S4/decision data | Self-contained `homeostat.html` in `homeostat/s5/homeostat-render/<date>/` — no LLM call |
 
 **`prompts/`** — plain text task prompts for the LLM calls, one folder per VSM system (`prompts/s1b/`, `prompts/s1d/`, `prompts/s4/`) so prompts don't get lumped together as the project grows. Edit these to tune editorial behaviour without touching Python. The live prompts are gitignored, since they encode a specific imprint's editorial voice; only `prompts/examples/<system>/` is committed, as reference material. **`prompts/s5/policy_evaluation_task.txt` is the one exception — it's committed**, since it's substantively the same editorial policy already public in `docs/vsm.md`, not personal-but-unpublished editorial voice; see `docs/adr/006-system-5-policy-agent.md`, point 7. See Setup below.
 
@@ -137,6 +142,20 @@ candidates/
 ```
 
 `s1a/briefs/` is a landing spot for the brief, not evidence that System 1A is implemented — identifying and sourcing a candidate is still entirely manual today. See `docs/adr/006-system-5-policy-agent.md`, point 8, for why that line is worth keeping clear.
+
+**The homeostat dashboard gets a fifth perpetual root**, `homeostat/`, same shape as the other four — a periodic artifact confronting System 3 and System 4 has no book, and no single date, to belong to:
+
+```
+homeostat/
+├── manifest.yaml
+├── decisions.yaml                        # flat, append-only — `s5 log-decision` appends here
+└── s5/
+    ├── homeostat-scan/2026-08-01/combined.txt
+    ├── homeostat/2026-08-01/combined.txt        # tensions/tradeoffs narrative
+    └── homeostat-render/2026-08-01/combined.html # the actual dashboard
+```
+
+Run the whole thing with `pipeline.py s2 homeostat run`, then open the resulting `.html` file directly in any browser — it's fully self-contained (inline CSS, inline SVG chart, no external requests), so it works offline and travels as a single file. See `docs/adr/007-system5-homeostat-dashboard.md` for the full design, including why this pipeline is *not* orchestrated the same way book production is (it's meant to be redone every period, not skipped once "done").
 
 ---
 
@@ -367,6 +386,20 @@ uv run python pipeline.py s5 evaluate candidates/s1a/briefs/life-of-a-nomad.txt
 ```
 
 This writes a verdict (fits / borderline / doesn't fit) to `candidates/s5/evaluate/life-of-a-nomad.txt`, reasoned against the editorial policy in `docs/vsm.md`. It's advisory only — nothing here creates a book, updates a database, or decides anything for you; if you agree with the verdict and want to proceed, run `pipeline.py init life-of-a-nomad` yourself, same manual step as always. See `docs/adr/006-system-5-policy-agent.md`, and note point 8 in particular: this doesn't automate finding or vetting candidates, only checking one you've already found against policy.
+
+**Confront System 3 against System 4 and get an actual dashboard, not another document (System 5):**
+
+```bash
+uv run python pipeline.py s2 homeostat run
+```
+
+This runs all three homeostat stages in order and writes `homeostat/s5/homeostat-render/<today>/combined.html` — open it in any browser. Unlike book production, running this again (even the same day) redoes the whole chain and produces a fresh snapshot; it never skips a stage because it was already `done`. `pipeline.py s2 homeostat status` shows each stage's last recorded outcome without re-running anything. After reading the dashboard:
+
+```bash
+uv run python pipeline.py s5 log-decision "S4 briefing flagged rising audiobook demand; S3 shows three titles already at full capacity." "Deferred to next quarter; no new title started this month."
+```
+
+This appends one line to `homeostat/decisions.yaml` — the next dashboard render shows it in the decision history. See `docs/adr/007-system5-homeostat-dashboard.md` for the full design, including why this needed its own orchestration mechanism distinct from `s2 run <book_slug>`.
 
 ---
 

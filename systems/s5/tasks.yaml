@@ -5,3 +5,18 @@ tasks:
     # A candidate brief is short prose (a paragraph or two), read in one
     # call — not chunked like a manuscript.
     max_chars: 100000
+
+  # Homeostat pipeline (ADR 007) — periodic S3/S4 confrontation dashboard.
+  # Not orchestrated by `s2 run <book_slug>` (these operate against
+  # homeostat/, not a book); driven instead by `s2 homeostat run`.
+  - name: homeostat-scan
+    engine: homeostat_scan
+
+  - name: homeostat
+    engine: llm_text
+    prompt: prompts/s5/homeostat_task.txt
+    # Never manuscript-length input — read in one call, not chunked.
+    max_chars: 100000
+
+  - name: homeostat-render
+    engine: homeostat_render

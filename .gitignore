@@ -37,3 +37,7 @@ books/
 # and intelligence/: personal/business-sensitive working data, not committed.
 # See docs/adr/006-system-5-policy-agent.md.
 /candidates/
+
+# System 5's homeostat dashboard folder — same treatment. See
+# docs/adr/007-system5-homeostat-dashboard.md.
+/homeostat/

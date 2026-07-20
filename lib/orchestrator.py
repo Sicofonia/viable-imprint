@@ -7,7 +7,17 @@ Builds the cross-system task graph from `s1b`/`s1d`'s `tasks.yaml` manifests
 
 Scoped to book-scoped systems only — System 4 isn't book-scoped (ADR 003)
 and its two-task chain isn't the coordination problem this solves.
+
+This file has two genuinely different execution models side by side, not
+one generalized to cover both:
+- `run_book()` / `_load_graph()`: readiness-gated, "done means done forever,"
+  fan-out aware — book production.
+- `run_homeostat()` (ADR 007) and any future periodic pipeline: unconditional,
+  strictly linear re-execution every call — there is no "already done" check,
+  because a monthly artifact is meant to be redone every period, not skipped.
+Don't assume these are interchangeable.
 """
+import importlib
 from pathlib import Path
 
 import click
@@ -15,6 +25,13 @@ import click
 from lib import manifest, task_loader
 
 BOOK_SYSTEMS = ("s1b", "s1d")
+
+# System 5's homeostat pipeline (ADR 007) — explicit, ordered (system, task
+# name) list rather than "every task in system s5", because s5's tasks.yaml
+# spans two different roots (`evaluate` -> candidates/, this trio ->
+# homeostat/), unlike s1b/s1d (uniformly book-scoped) or s4 (uniformly
+# intelligence/-scoped).
+HOMEOSTAT_TASKS = [("s5", "homeostat-scan"), ("s5", "homeostat"), ("s5", "homeostat-render")]
 
 
 def _load_graph() -> list:
@@ -147,3 +164,50 @@ def run_book(root: Path, config: dict, only: str = None, step: bool = False) -> 
 def _summarize(root: Path, done: list, failed: list) -> dict:
     remaining = [r for r in book_status(root) if r["status"] in ("ready", "blocked", "failed")]
     return {"done": done, "failed": failed, "complete": not remaining}
+
+
+def _task_dict(system: str, name: str) -> dict:
+    for task in task_loader.load_system_tasks(system):
+        if task["name"] == name:
+            return task
+    raise ValueError(f"Task {system}.{name} not found in systems/{system}/tasks.yaml")
+
+
+def run_homeostat(root: Path, config: dict, step: bool = False) -> dict:
+    """Run System 5's homeostat chain in declared order, unconditionally —
+    periodic, not one-and-done, so there is no readiness/"already done" check
+    here at all, unlike `run_book()`. A failure stops the chain immediately:
+    this is strictly linear (no independent siblings the way System 1D's
+    fan-out tasks are), so a broken `homeostat-scan` must not let `homeostat`
+    run against stale or missing input.
+    """
+    done, failed = [], []
+    input_file = None
+    for system, name in HOMEOSTAT_TASKS:
+        task = _task_dict(system, name)
+        engine = importlib.import_module(f"engines.{task['engine']}")
+        label = f"{system}.{name}"
+        click.echo(f"[s2] Running {label}...")
+        try:
+            input_file = task_loader.run_task(
+                root, config, system, task,
+                input_file=input_file if getattr(engine, "CLI_ARG", "file") != "none" else None,
+            )
+            done.append(label)
+        except Exception as e:
+            click.echo(f"[s2] {label} failed: {e}")
+            failed.append(label)
+            break  # linear chain — no point running the next stage against a failure
+        if step:
+            break
+    return {"done": done, "failed": failed, "complete": len(done) == len(HOMEOSTAT_TASKS)}
+
+
+def homeostat_status(root: Path) -> list:
+    """Read-only: each homeostat task's last recorded outcome, straight from
+    the ledger — no readiness computation, since there's no notion of
+    "blocked" in a chain that's always re-run top to bottom.
+    """
+    ledger = manifest.load(root).get("tasks", {})
+    return [{"system": s, "name": n, **ledger.get(f"{s}.{n}", {"status": "never run"})}
+            for s, n in HOMEOSTAT_TASKS]

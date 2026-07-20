@@ -45,3 +45,8 @@ intelligence_dir: intelligence
 # evaluation has no editorial commitment behind it yet, so it doesn't belong
 # under books_dir.
 candidates_dir: candidates
+
+# Root folder for System 5's homeostat pipeline (ADR 007) — the S3/S4
+# confrontation dashboard. Not book-scoped, same reasoning as intelligence_dir
+# and candidates_dir.
+homeostat_dir: homeostat

@@ -29,7 +29,7 @@ import click
 import yaml
 from dotenv import load_dotenv
 
-from lib import dashboard, orchestrator, paths
+from lib import dashboard, homeostat, orchestrator, paths
 from lib.task_loader import build_system_group
 
 load_dotenv()  # reads .env into os.environ before any provider is instantiated
@@ -105,7 +105,25 @@ def init(ctx, book_slug):
 cli.add_command(build_system_group("s1b", "System 1B — Editorial Production"))
 cli.add_command(build_system_group("s1d", "System 1D — Publication and Marketing"))
 cli.add_command(build_system_group("s4", "System 4 — Strategic Intelligence"))
-cli.add_command(build_system_group("s5", "System 5 — Identity, Values and Policy"))
+
+# s5 mixes manifest-driven tasks (evaluate, the homeostat trio) with one
+# hand-written command (log-decision) — captured in a variable so the latter
+# can be added before the group is registered. See docs/adr/007, point 5.
+_s5_group = build_system_group("s5", "System 5 — Identity, Values and Policy")
+
+
+@_s5_group.command(name="log-decision")
+@click.argument("tension")
+@click.argument("decision")
+@click.pass_context
+def s5_log_decision(ctx, tension, decision):
+    """Append one entry to the homeostat decision log (homeostat/decisions.yaml)."""
+    root = paths.homeostat_root(ctx.obj["config"])
+    homeostat.record_decision(root, tension, decision)
+    click.echo(f"Recorded: {root / 'decisions.yaml'}")
+
+
+cli.add_command(_s5_group)
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +201,48 @@ def s2_run(ctx, book_slug, only, step):
         sys.exit(1)
 
 
+@click.group(name="homeostat", help="System 5's homeostat pipeline (not book-scoped) — see ADR 007")
+def s2_homeostat():
+    pass
+
+
+@s2_homeostat.command(name="status")
+@click.pass_context
+def s2_homeostat_status(ctx):
+    """Show each homeostat stage's last recorded outcome."""
+    root = paths.homeostat_root(ctx.obj["config"])
+    click.echo(f"Homeostat ({root})\n")
+    for row in orchestrator.homeostat_status(root):
+        label = f"{row['system']}.{row['name']}"
+        if row["status"] == "done":
+            click.echo(f"  [x] {label:<20} {row.get('completed_at', '')}  {row.get('output', '')}")
+        elif row["status"] == "failed":
+            click.echo(f"  [!] {label:<20} failed — {row.get('error')}")
+        else:
+            click.echo(f"  [ ] {label:<20} never run")
+
+
+@s2_homeostat.command(name="run")
+@click.option("--step", is_flag=True, help="Run exactly one stage and stop.")
+@click.pass_context
+def s2_homeostat_run(ctx, step):
+    """Run homeostat-scan -> homeostat -> homeostat-render, in order, unconditionally."""
+    config = ctx.obj["config"]
+    root = paths.homeostat_root(config)
+    summary = orchestrator.run_homeostat(root, config, step=step)
+
+    click.echo(f"\nDone: {len(summary['done'])}, Failed: {len(summary['failed'])}")
+    for label in summary["done"]:
+        click.echo(f"  [x] {label}")
+    for label in summary["failed"]:
+        click.echo(f"  [!] {label}")
+    if summary["complete"]:
+        click.echo("Homeostat chain complete.")
+    if summary["failed"]:
+        sys.exit(1)
+
+
+s2.add_command(s2_homeostat)
 cli.add_command(s2)
 
 

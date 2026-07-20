@@ -45,6 +45,19 @@ def candidates_root(config: dict) -> Path:
     return root
 
 
+def homeostat_root(config: dict) -> Path:
+    """Return System 5's perpetual homeostat-dashboard folder, creating it
+    (and its manifest.yaml) on first use — same shape as `intelligence_root()`
+    and `candidates_root()`. See docs/adr/007-system5-homeostat-dashboard.md.
+    """
+    root = Path(config.get("homeostat_dir", "homeostat")).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "manifest.yaml"
+    if not manifest_path.exists():
+        manifest_path.write_text("slug: homeostat\n", encoding="utf-8")
+    return root
+
+
 def stage_output_dir(input_file: Path, book_root: Path, system: str, output_stage: str) -> Path:
     """Return output directory for a task, nested under the VSM system that
     produces it (mirroring the CLI's own s1b/s1d grouping), and mirroring
@@ -65,11 +78,25 @@ def load_prompt(path: str) -> str:
     p = Path(path)
     if not p.exists():
         raise click.ClickException(f"Prompt file not found: {path}")
-    content = p.read_text(encoding="utf-8")
-    # Strip comment lines (lines starting with #)
-    stripped = "\n".join(
-        line for line in content.splitlines() if not line.startswith("#")
-    ).strip()
+    lines = p.read_text(encoding="utf-8").splitlines()
+
+    # Only a *leading* block of "# ..." lines is a maintainer comment (e.g.
+    # the sync-reminder atop prompts/s5/policy_evaluation_task.txt, or the
+    # usage notes atop every prompts/examples/ file) — stop stripping at the
+    # first line that isn't blank and doesn't start with "#". A "#"/"##"
+    # appearing later in the file is the prompt's own literal Markdown
+    # heading, part of the fill-in-the-template contract (ADR 002 point 6),
+    # and must reach the model untouched. The previous version of this
+    # function stripped every "#"-prefixed line anywhere in the file, which
+    # silently deleted every such heading from every fill-in-template prompt
+    # project-wide — found while building ADR 007's homeostat prompt, whose
+    # headings were being dropped for exactly this reason. See that ADR's
+    # implementation notes.
+    i = 0
+    while i < len(lines) and (lines[i].startswith("#") or not lines[i].strip()):
+        i += 1
+    stripped = "\n".join(lines[i:]).strip()
+
     if not stripped:
         raise click.ClickException(
             f"Prompt file is empty: {path}\n"
