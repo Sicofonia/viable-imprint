@@ -12,9 +12,10 @@ This file has two genuinely different execution models side by side, not
 one generalized to cover both:
 - `run_book()` / `_load_graph()`: readiness-gated, "done means done forever,"
   fan-out aware — book production.
-- `run_homeostat()` (ADR 007) and any future periodic pipeline: unconditional,
-  strictly linear re-execution every call — there is no "already done" check,
-  because a monthly artifact is meant to be redone every period, not skipped.
+- `run_periodic()`: unconditional, strictly linear re-execution every call —
+  there is no "already done" check, because a periodic artifact (System 5's
+  homeostat, ADR 007; System 1D's newsletter, ADR 008; any future one) is
+  meant to be redone every period, not skipped.
 Don't assume these are interchangeable.
 """
 import importlib
@@ -186,17 +187,23 @@ def _task_dict(system: str, name: str) -> dict:
     raise ValueError(f"Task {system}.{name} not found in systems/{system}/tasks.yaml")
 
 
-def run_homeostat(root: Path, config: dict, step: bool = False) -> dict:
-    """Run System 5's homeostat chain in declared order, unconditionally —
-    periodic, not one-and-done, so there is no readiness/"already done" check
-    here at all, unlike `run_book()`. A failure stops the chain immediately:
-    this is strictly linear (no independent siblings the way System 1D's
-    fan-out tasks are), so a broken `homeostat-scan` must not let `homeostat`
-    run against stale or missing input.
+def run_periodic(root: Path, config: dict, tasks: list, step: bool = False) -> dict:
+    """Run a periodic pipeline's tasks in declared order, unconditionally —
+    shared by System 5's homeostat (ADR 007) and System 1D's newsletter
+    (ADR 008), the project's two periodic (not book-scoped) pipelines, and
+    any future one of the same shape. Periodic, not one-and-done, so there is
+    no readiness/"already done" check here at all, unlike `run_book()`. A
+    failure stops the chain immediately: this is strictly linear (no
+    independent siblings the way System 1D's book-scoped fan-out tasks are),
+    so a broken first stage must not let a later one run against stale or
+    missing input.
+
+    `tasks` is an ordered list of `(system, task_name)` pairs — see
+    `HOMEOSTAT_TASKS`/`NEWSLETTER_TASKS`.
     """
     done, failed = [], []
     input_file = None
-    for system, name in HOMEOSTAT_TASKS:
+    for system, name in tasks:
         task = _task_dict(system, name)
         engine = importlib.import_module(f"engines.{task['engine']}")
         label = f"{system}.{name}"
@@ -213,54 +220,15 @@ def run_homeostat(root: Path, config: dict, step: bool = False) -> dict:
             break  # linear chain — no point running the next stage against a failure
         if step:
             break
-    return {"done": done, "failed": failed, "complete": len(done) == len(HOMEOSTAT_TASKS)}
+    return {"done": done, "failed": failed, "complete": len(done) == len(tasks)}
 
 
-def homeostat_status(root: Path) -> list:
-    """Read-only: each homeostat task's last recorded outcome, straight from
+def periodic_status(root: Path, tasks: list) -> list:
+    """Read-only: each periodic task's last recorded outcome, straight from
     the ledger — no readiness computation, since there's no notion of
-    "blocked" in a chain that's always re-run top to bottom.
+    "blocked" in a chain that's always re-run top to bottom. Shared by the
+    homeostat and newsletter `status` commands; see `run_periodic()`.
     """
     ledger = manifest.load(root).get("tasks", {})
     return [{"system": s, "name": n, **ledger.get(f"{s}.{n}", {"status": "never run"})}
-            for s, n in HOMEOSTAT_TASKS]
-
-
-def run_newsletter(root: Path, config: dict, step: bool = False) -> dict:
-    """Run System 1D's newsletter chain in declared order, unconditionally —
-    structurally identical to `run_homeostat()` (ADR 007). Deliberately not
-    unified into one shared helper yet — see docs/adr/008-system1d-newsletter.md,
-    Alternatives: both periodic pipelines were unimplemented ADRs at the same
-    time, and coupling their implementations together would have added
-    review friction for a small amount of duplicated code. Worth unifying now
-    that both exist for real.
-    """
-    done, failed = [], []
-    input_file = None
-    for system, name in NEWSLETTER_TASKS:
-        task = _task_dict(system, name)
-        engine = importlib.import_module(f"engines.{task['engine']}")
-        label = f"{system}.{name}"
-        click.echo(f"[s2] Running {label}...")
-        try:
-            input_file = task_loader.run_task(
-                root, config, system, task,
-                input_file=input_file if getattr(engine, "CLI_ARG", "file") != "none" else None,
-            )
-            done.append(label)
-        except Exception as e:
-            click.echo(f"[s2] {label} failed: {e}")
-            failed.append(label)
-            break
-        if step:
-            break
-    return {"done": done, "failed": failed, "complete": len(done) == len(NEWSLETTER_TASKS)}
-
-
-def newsletter_status(root: Path) -> list:
-    """Read-only: each newsletter task's last recorded outcome. See
-    `homeostat_status()`.
-    """
-    ledger = manifest.load(root).get("tasks", {})
-    return [{"system": s, "name": n, **ledger.get(f"{s}.{n}", {"status": "never run"})}
-            for s, n in NEWSLETTER_TASKS]
+            for s, n in tasks]
