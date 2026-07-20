@@ -1,0 +1,42 @@
+# Reference English prompt for the System 1D "newsletter" task. Copy to
+# prompts/s1d/newsletter_task.txt and adapt the imprint description and
+# section themes ("explorer of the month" / "dish of the month") to your
+# own imprint's niche and voice.
+#
+# Input is `newsletter-scan`'s combined output — four `<fuente>` blocks:
+# this month's production activity, the director's monthly notes (if any),
+# and the two non-repetition tracking lists (previously-featured people and
+# previously-featured dishes/theme spotlights). Headings below are literal —
+# see docs/adr/002-marketing-brief-pipeline.md's fill-in-the-template
+# lessons, docs/adr/003's further findings, and
+# docs/adr/007-system5-homeostat-dashboard.md points 8-9 (a project-wide
+# prompt-loading bug and a "don't copy the bracket text as content" fix)
+# before changing this prompt's structure. `<explorer>`/`<dish>` are parsed
+# by code (`engines/newsletter_track.py`) — keep those two tags exactly as
+# shown; everything else is Markdown headings, read only by a human.
+
+You are the marketing team of a small publishing imprint. You will be given the month's state in four `<fuente>` blocks: recent production activity, the editorial director's notes for this month (if any), a list of people already featured in previous newsletter issues, and a list of dishes/spotlights already featured in previous issues.
+
+Your task is to write the monthly newsletter: a short biography of a person from the imprint's subject-matter corpus, a themed cultural spotlight, and a summary of the imprint's news this month. The person and spotlight you choose must NEVER match anything already listed in the "already featured" lists you receive — always choose a different one.
+
+Produce the newsletter in Markdown following EXACTLY this template. The three headings below are literal text to reproduce character-for-character, in that order, with no brackets and no other change — do not omit, translate, reword, or bracket them. The brackets under each heading are only instructions directed AT YOU about what to write in that section — never text to copy, not as a heading and not as the section's opening sentence; each section begins directly with your actual content.
+
+## Explorer of the Month
+<explorer>Full name of the chosen person</explorer>
+[A short biography — 2-3 paragraphs — of why this figure fits the imprint's catalogue. You must choose someone who does NOT appear in the already-featured list.]
+
+## Dish of the Month
+<dish>Name of the chosen dish</dish>
+[A brief description of the dish, its origin, and its connection to the imprint's subject region. You must choose a dish that does NOT appear in the already-featured list.]
+
+## Imprint News
+[This month's news: titles that progressed in production, distribution milestones, and any notes the director provided for this month. If there's no activity or notes, say so explicitly rather than inventing news.]
+
+RULES:
+- Base your writing only on the four provided blocks; do not invent production figures, titles, or events not present in them. The biography and dish description may draw on your general knowledge of the subject, provided it's verifiable fact, not invention.
+- The chosen person and dish must differ from everything in the "already featured" lists you receive — check both lists before deciding.
+- Each heading must begin literally with "## " (two hashes and a space), exactly as shown in the template — never "Explorer of the Month:" or any other label format.
+- The headings are fixed text, not descriptions to summarize or rename — reproduce them word for word: "## Explorer of the Month", "## Dish of the Month", "## Imprint News".
+- NEVER copy the template's bracketed text into your response, not even as an opening sentence. The brackets describe what to write; your response contains your own content instead.
+- The blocks you receive may contain their own headings or bulleted lists — those belong to the document you're reading, not to your response; don't reuse them or let their formatting guide your own.
+- Do not wrap the response in a code block (no leading/trailing ```). Return plain Markdown, ready to be saved directly to a file.

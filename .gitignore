@@ -41,3 +41,7 @@ books/
 # System 5's homeostat dashboard folder — same treatment. See
 # docs/adr/007-system5-homeostat-dashboard.md.
 /homeostat/
+
+# System 1D's monthly newsletter folder — same treatment. See
+# docs/adr/008-system1d-newsletter.md.
+/newsletter/

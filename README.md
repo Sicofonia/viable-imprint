@@ -34,12 +34,12 @@ The pipeline is organised in four layers:
 
 **`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), the System 3 dashboard aggregation (`lib/dashboard.py`), and shared data access for the System 5 homeostat pipeline (`lib/homeostat.py` — finding System 4's latest briefing, reading/writing the decision log).
 
-**`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by twelve different tasks across three systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all), `feed_scan` (pull new items from a curated watchlist of external sources — RSS/Atom feeds, Project Gutenberg's bulk catalog, and an imprint's own catalog page — no LLM call), `homeostat_scan` (gather System 3/4/decision-log data into one file, no LLM call), `homeostat_render` (render the final self-contained dashboard HTML, no LLM call). Engines are written once and reused by any task that needs that shape of work.
+**`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by thirteen different tasks across three systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all), `feed_scan` (pull new items from a curated watchlist of external sources — RSS/Atom feeds, Project Gutenberg's bulk catalog, and an imprint's own catalog page — no LLM call), `homeostat_scan` (gather System 3/4/decision-log data into one file, no LLM call), `homeostat_render` (render the final self-contained dashboard HTML, no LLM call), `newsletter_scan` (gather this month's production activity, notes, and non-repetition tracking lists into one file, no LLM call), `newsletter_track` (check/record the featured explorer and dish, write the final clean copy, no LLM call). Engines are written once and reused by any task that needs that shape of work.
 
 **`systems/`** — one subfolder per VSM system, each holding a single `tasks.yaml` manifest. Only systems with implemented tasks exist here; a system is added when its first task is written. Each manifest entry names a task, the engine it uses, and that engine's parameters (typically a prompt file):
 
 - `systems/s1b/tasks.yaml` — System 1B (Editorial Production): cleanup, translate, ortho, copyedit, format
-- `systems/s1d/tasks.yaml` — System 1D (Publication and Marketing): brief, synopsis, story-map, one-pager, press-dossier, trailer-storyboard, goodreads-profile, metadata (see `docs/adr/002-marketing-brief-pipeline.md` for why marketing is a chain of small tasks rather than one big one)
+- `systems/s1d/tasks.yaml` — System 1D (Publication and Marketing): brief, synopsis, story-map, one-pager, press-dossier, trailer-storyboard, goodreads-profile, metadata (see `docs/adr/002-marketing-brief-pipeline.md` for why marketing is a chain of small tasks rather than one big one). Also `newsletter-scan`, `newsletter`, `newsletter-track` (see `docs/adr/008-system1d-newsletter.md`) — a periodic monthly newsletter, driven by `s2 newsletter run` rather than run by hand; see below
 - `systems/s4/tasks.yaml` — System 4 (Strategic Intelligence): scan, briefing (see `docs/adr/003-system-4-strategic-intelligence.md`) — unlike S1B/S1D, System 4 isn't about any one book, so it doesn't live under `books/` at all; see below
 - `systems/s5/tasks.yaml` — System 5 (Identity, Values and Policy): evaluate (see `docs/adr/006-system-5-policy-agent.md`) — reads a candidate text's description and returns an advisory fit/borderline/reject verdict against the editorial policy in `docs/vsm.md`. Not book-scoped either; see below. Also `homeostat-scan`, `homeostat`, `homeostat-render` (see `docs/adr/007-system5-homeostat-dashboard.md`) — a periodic S3/S4 confrontation dashboard, driven by `s2 homeostat run` rather than run by hand; see below
 
@@ -52,6 +52,8 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 **`pipeline.py s5 evaluate`** is System 5 (Identity, Values and Policy) — the one manifest-driven task whose prompt is committed rather than gitignored, since it's substantively the same editorial policy already public in `docs/vsm.md`. It reuses `engines/llm_text.py` completely unchanged: the "policy agent" is just `vsm.md`'s System 5 section reformatted as a system prompt. Given a candidate's description (title, author, approximate date, subject, what's known about rights/source quality), it returns an advisory verdict — fits / borderline / doesn't fit — reasoned against the thematic scope and non-negotiable values in `docs/vsm.md`. It does **not** decide anything: no candidates database, no automatic book creation, nothing gated. **`pipeline.py candidate new <slug>`** is the bootstrap (mirroring `init`, but for a candidate rather than a book) — it does no System 1A work itself (identifying or sourcing a candidate is still entirely a human task today); it just creates the folder a brief goes in. See `docs/adr/006-system-5-policy-agent.md`, especially point 8, on why that distinction is worth keeping clear.
 
 **`pipeline.py s2 homeostat`** drives System 5's other advisory artifact — the homeostat dashboard, Beer's System 3/4 conflict-arbitration role given a concrete shape (`docs/adr/007-system5-homeostat-dashboard.md`). Three tasks (`homeostat-scan` → `homeostat` → `homeostat-render`) gather System 3's portfolio snapshot, System 4's latest briefing, and a decision log into a single self-contained `homeostat.html` — no server, no scheduler, a plain HTML file you open in a browser. Unlike book production, this pipeline is periodic, not one-and-done: `s2 homeostat run` re-executes the whole chain every time, producing a fresh dated snapshot, rather than skipping steps already marked `done` the way `s2 run <book_slug>` does. `pipeline.py s5 log-decision "<tension>" "<decision>"` appends one line to the decision log the dashboard displays — the one genuinely human step, kept as a plain two-argument command rather than a form.
+
+**`pipeline.py s2 newsletter`** drives System 1D's monthly newsletter (`docs/adr/008-system1d-newsletter.md`) — the same periodic shape as the homeostat pipeline, one system over: `newsletter-scan` (gather this month's production activity, the director's optional monthly notes, and two non-repetition tracking lists) → `newsletter` (`llm_text`, drafts an explorer-of-the-month spotlight, a dish-of-the-month cultural feature, and imprint news, in that order) → `newsletter-track` (checks the featured explorer/dish against the tracking lists — warns rather than fails on a repeat — records new ones, and writes the final copy with its tracking tags stripped, ready to paste into whatever you actually send through). These three tasks live in `systems/s1d/tasks.yaml` alongside System 1D's book-scoped tasks but are marked `book_scoped: false`, so `s2 run <book_slug>` never pulls them into a book's task graph, and `s2 newsletter run` is the only thing that drives them in sequence — matching System 1D's own ownership at the CLI level (`pipeline.py s1d newsletter-scan` etc. still work directly) while System 2 handles the sequencing, the same relationship it already has with every other system's tasks.
 
 **Every task's output lands under the VSM system that produced it** (`s1b/`, `s1d/`), mirroring the CLI's own nested command structure (`pipeline.py s1b <task>`, `pipeline.py s1d <task>`) — a book's folder never mixes editorial-production output with marketing output at the same level. `manifest.yaml` is the one exception, staying at the book root since it's shared across every system. Cross-system chaining still works exactly as you'd expect: `s1d brief`, for instance, reads from `s1b/copyedit/es/`, and its own output lands under `s1d/`, not `s1b/`.
 
@@ -76,6 +78,9 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 | `s5 homeostat-scan` | System 5 | Nothing (reads S3/S4/decisions directly) | Combined snapshot in `homeostat/s5/homeostat-scan/<date>/` — no LLM call |
 | `s5 homeostat` | System 5 | That scan | Tensions/tradeoffs narrative in `homeostat/s5/homeostat/<date>/` |
 | `s5 homeostat-render` | System 5 | That narrative + fresh S3/S4/decision data | Self-contained `homeostat.html` in `homeostat/s5/homeostat-render/<date>/` — no LLM call |
+| `s1d newsletter-scan` | System 1D | Nothing (reads S3 activity, notes, tracking lists directly) | Combined snapshot in `newsletter/s1d/newsletter-scan/<date>/` — no LLM call |
+| `s1d newsletter` | System 1D | That scan | Draft (explorer, dish, news) in `newsletter/s1d/newsletter/<date>/` |
+| `s1d newsletter-track` | System 1D | That draft | Final, tag-stripped copy in `newsletter/s1d/newsletter-track/<date>/` — no LLM call, updates non-repetition tracking |
 
 **`prompts/`** — plain text task prompts for the LLM calls, one folder per VSM system (`prompts/s1b/`, `prompts/s1d/`, `prompts/s4/`) so prompts don't get lumped together as the project grows. Edit these to tune editorial behaviour without touching Python. The live prompts are gitignored, since they encode a specific imprint's editorial voice; only `prompts/examples/<system>/` is committed, as reference material. **`prompts/s5/policy_evaluation_task.txt` is the one exception — it's committed**, since it's substantively the same editorial policy already public in `docs/vsm.md`, not personal-but-unpublished editorial voice; see `docs/adr/006-system-5-policy-agent.md`, point 7. See Setup below.
 
@@ -156,6 +161,23 @@ homeostat/
 ```
 
 Run the whole thing with `pipeline.py s2 homeostat run`, then open the resulting `.html` file directly in any browser — it's fully self-contained (inline CSS, inline SVG chart, no external requests), so it works offline and travels as a single file. See `docs/adr/007-system5-homeostat-dashboard.md` for the full design, including why this pipeline is *not* orchestrated the same way book production is (it's meant to be redone every period, not skipped once "done").
+
+**The monthly newsletter gets a sixth perpetual root**, `newsletter/`, same periodic reasoning as `homeostat/` — it's calendar-driven and catalog-wide, not tied to any one book:
+
+```
+newsletter/
+├── manifest.yaml
+├── featured_explorers.yaml                 # flat, append-only — non-repetition tracking
+├── featured_dishes.yaml                    # flat, append-only — non-repetition tracking
+├── notes/
+│   └── 2026-08.txt                         # optional, human-written monthly notes
+└── s1d/
+    ├── newsletter-scan/2026-08-01/combined.txt
+    ├── newsletter/2026-08-01/combined.txt        # draft — tags still in place
+    └── newsletter-track/2026-08-01/combined.txt  # final, clean copy — the actual deliverable
+```
+
+Run it with `pipeline.py s2 newsletter run`; the final copy under `newsletter-track/<date>/` is ready to paste into whatever you actually send the newsletter through (Mailchimp, a plain email, your own site) — Markdown only for v1, matching every other System 1D output. See `docs/adr/008-system1d-newsletter.md` for the full design, including how repeating a previously-featured explorer or dish is prevented (an exclusion list in the prompt) *and* verified (a code-side check on the model's actual choice, since a model will occasionally ignore an instruction like this).
 
 ---
 
@@ -400,6 +422,14 @@ uv run python pipeline.py s5 log-decision "S4 briefing flagged rising audiobook 
 ```
 
 This appends one line to `homeostat/decisions.yaml` — the next dashboard render shows it in the decision history. See `docs/adr/007-system5-homeostat-dashboard.md` for the full design, including why this needed its own orchestration mechanism distinct from `s2 run <book_slug>`.
+
+**Generate the monthly newsletter (System 1D):**
+
+```bash
+uv run python pipeline.py s2 newsletter run
+```
+
+This drives `newsletter-scan` → `newsletter` → `newsletter-track` in order and writes the finished issue to `newsletter/s1d/newsletter-track/<today>/combined.txt` — a Markdown draft with an explorer-of-the-month spotlight, a dish-of-the-month feature, and imprint news, in that order, ready to paste into whatever you send it through. Optionally write `newsletter/notes/<YYYY-MM>.txt` beforehand with anything the pipeline can't know on its own (a press mention, a distribution milestone) — if it's missing, `newsletter-scan` warns and continues without it rather than failing. The explorer and dish are checked against `newsletter/featured_explorers.yaml`/`featured_dishes.yaml` and never knowingly repeated; a repeat that slips past the prompt anyway is flagged as a warning, not silently sent. See `docs/adr/008-system1d-newsletter.md` for the full design, including why these three tasks live in `systems/s1d/tasks.yaml` (System 1D still owns them — `pipeline.py s1d newsletter-scan` etc. work directly) even though `s2 newsletter run` is what actually sequences them, the same relationship System 2 already has with every other system's tasks.
 
 ---
 

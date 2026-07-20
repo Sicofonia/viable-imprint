@@ -90,3 +90,27 @@ tasks:
     # engines/metadata_doc.py and lib/metadata_blocks.py.
     metadata_config: templates/marketing_metadata.yaml
     input: s1d.brief
+
+  # Monthly newsletter pipeline (ADR 008) — periodic, catalog-wide, not
+  # book-scoped. `book_scoped: false` keeps these three out of every book's
+  # `s2 run <book_slug>` task graph; driven instead by `s2 newsletter run`.
+  - name: newsletter-scan
+    engine: newsletter_scan
+    book_scoped: false
+
+  - name: newsletter
+    engine: llm_text
+    prompt: prompts/s1d/newsletter_task.txt
+    # Never manuscript-length input — read in one call, not chunked.
+    max_chars: 100000
+    input: s1d.newsletter-scan
+    book_scoped: false
+    # Real contact facts appended without ever asking the LLM to guess them —
+    # same established mechanism press-dossier already uses.
+    metadata_config: templates/marketing_metadata.yaml
+    metadata_footer: contact_facts
+
+  - name: newsletter-track
+    engine: newsletter_track
+    input: s1d.newsletter
+    book_scoped: false

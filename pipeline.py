@@ -242,7 +242,49 @@ def s2_homeostat_run(ctx, step):
         sys.exit(1)
 
 
+@click.group(name="newsletter", help="System 1D's monthly newsletter pipeline (not book-scoped) — see ADR 008")
+def s2_newsletter():
+    pass
+
+
+@s2_newsletter.command(name="status")
+@click.pass_context
+def s2_newsletter_status(ctx):
+    """Show each newsletter stage's last recorded outcome."""
+    root = paths.newsletter_root(ctx.obj["config"])
+    click.echo(f"Newsletter ({root})\n")
+    for row in orchestrator.newsletter_status(root):
+        label = f"{row['system']}.{row['name']}"
+        if row["status"] == "done":
+            click.echo(f"  [x] {label:<20} {row.get('completed_at', '')}  {row.get('output', '')}")
+        elif row["status"] == "failed":
+            click.echo(f"  [!] {label:<20} failed — {row.get('error')}")
+        else:
+            click.echo(f"  [ ] {label:<20} never run")
+
+
+@s2_newsletter.command(name="run")
+@click.option("--step", is_flag=True, help="Run exactly one stage and stop.")
+@click.pass_context
+def s2_newsletter_run(ctx, step):
+    """Run newsletter-scan -> newsletter -> newsletter-track, in order, unconditionally."""
+    config = ctx.obj["config"]
+    root = paths.newsletter_root(config)
+    summary = orchestrator.run_newsletter(root, config, step=step)
+
+    click.echo(f"\nDone: {len(summary['done'])}, Failed: {len(summary['failed'])}")
+    for label in summary["done"]:
+        click.echo(f"  [x] {label}")
+    for label in summary["failed"]:
+        click.echo(f"  [!] {label}")
+    if summary["complete"]:
+        click.echo("Newsletter chain complete.")
+    if summary["failed"]:
+        sys.exit(1)
+
+
 s2.add_command(s2_homeostat)
+s2.add_command(s2_newsletter)
 cli.add_command(s2)
 
 

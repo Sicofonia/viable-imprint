@@ -33,15 +33,28 @@ BOOK_SYSTEMS = ("s1b", "s1d")
 # intelligence/-scoped).
 HOMEOSTAT_TASKS = [("s5", "homeostat-scan"), ("s5", "homeostat"), ("s5", "homeostat-render")]
 
+# System 1D's monthly newsletter pipeline (ADR 008) — same periodic shape as
+# HOMEOSTAT_TASKS. Unlike homeostat (a whole system, s5, that's simply never
+# in BOOK_SYSTEMS), these three tasks are declared inside s1d's own
+# tasks.yaml alongside book-scoped tasks — see the `book_scoped` filter in
+# `_load_graph()` below, which is what keeps them out of book production's
+# task graph.
+NEWSLETTER_TASKS = [("s1d", "newsletter-scan"), ("s1d", "newsletter"), ("s1d", "newsletter-track")]
+
 
 def _load_graph() -> list:
     """Ordered list of {system, task, depends_on} across every book-scoped
     system. `depends_on` is a ledger key ("<system>.<task-name>"), or None
     for a system's first task when it declares no explicit `input:`.
+
+    Excludes any task declaring `book_scoped: false` (ADR 008) — a periodic,
+    non-book task (e.g. System 1D's newsletter trio) can live in the same
+    `tasks.yaml` as book-scoped tasks without being pulled into every book's
+    graph.
     """
     graph = []
     for system in BOOK_SYSTEMS:
-        tasks = task_loader.load_system_tasks(system)
+        tasks = [t for t in task_loader.load_system_tasks(system) if t.get("book_scoped", True)]
         for i, task in enumerate(tasks):
             depends_on = task.get("input")
             if depends_on is None and i > 0:
@@ -211,3 +224,43 @@ def homeostat_status(root: Path) -> list:
     ledger = manifest.load(root).get("tasks", {})
     return [{"system": s, "name": n, **ledger.get(f"{s}.{n}", {"status": "never run"})}
             for s, n in HOMEOSTAT_TASKS]
+
+
+def run_newsletter(root: Path, config: dict, step: bool = False) -> dict:
+    """Run System 1D's newsletter chain in declared order, unconditionally —
+    structurally identical to `run_homeostat()` (ADR 007). Deliberately not
+    unified into one shared helper yet — see docs/adr/008-system1d-newsletter.md,
+    Alternatives: both periodic pipelines were unimplemented ADRs at the same
+    time, and coupling their implementations together would have added
+    review friction for a small amount of duplicated code. Worth unifying now
+    that both exist for real.
+    """
+    done, failed = [], []
+    input_file = None
+    for system, name in NEWSLETTER_TASKS:
+        task = _task_dict(system, name)
+        engine = importlib.import_module(f"engines.{task['engine']}")
+        label = f"{system}.{name}"
+        click.echo(f"[s2] Running {label}...")
+        try:
+            input_file = task_loader.run_task(
+                root, config, system, task,
+                input_file=input_file if getattr(engine, "CLI_ARG", "file") != "none" else None,
+            )
+            done.append(label)
+        except Exception as e:
+            click.echo(f"[s2] {label} failed: {e}")
+            failed.append(label)
+            break
+        if step:
+            break
+    return {"done": done, "failed": failed, "complete": len(done) == len(NEWSLETTER_TASKS)}
+
+
+def newsletter_status(root: Path) -> list:
+    """Read-only: each newsletter task's last recorded outcome. See
+    `homeostat_status()`.
+    """
+    ledger = manifest.load(root).get("tasks", {})
+    return [{"system": s, "name": n, **ledger.get(f"{s}.{n}", {"status": "never run"})}
+            for s, n in NEWSLETTER_TASKS]
