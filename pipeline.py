@@ -201,6 +201,37 @@ def s2_run(ctx, book_slug, only, step):
         sys.exit(1)
 
 
+def _echo_periodic_status(root, tasks):
+    """Shared by every periodic pipeline's `status` command (homeostat, ADR
+    007; newsletter, ADR 008) — one row per task, straight from the ledger.
+    """
+    for row in orchestrator.periodic_status(root, tasks):
+        label = f"{row['system']}.{row['name']}"
+        if row["status"] == "done":
+            click.echo(f"  [x] {label:<20} {row.get('completed_at', '')}  {row.get('output', '')}")
+        elif row["status"] == "failed":
+            click.echo(f"  [!] {label:<20} failed — {row.get('error')}")
+        else:
+            click.echo(f"  [ ] {label:<20} never run")
+
+
+def _run_periodic_command(root, config, tasks, step, complete_message):
+    """Shared by every periodic pipeline's `run` command — runs the chain via
+    `orchestrator.run_periodic()`, echoes the summary, exits non-zero on any
+    failure so scripting/cron callers can detect it.
+    """
+    summary = orchestrator.run_periodic(root, config, tasks, step=step)
+    click.echo(f"\nDone: {len(summary['done'])}, Failed: {len(summary['failed'])}")
+    for label in summary["done"]:
+        click.echo(f"  [x] {label}")
+    for label in summary["failed"]:
+        click.echo(f"  [!] {label}")
+    if summary["complete"]:
+        click.echo(complete_message)
+    if summary["failed"]:
+        sys.exit(1)
+
+
 @click.group(name="homeostat", help="System 5's homeostat pipeline (not book-scoped) — see ADR 007")
 def s2_homeostat():
     pass
@@ -212,14 +243,7 @@ def s2_homeostat_status(ctx):
     """Show each homeostat stage's last recorded outcome."""
     root = paths.homeostat_root(ctx.obj["config"])
     click.echo(f"Homeostat ({root})\n")
-    for row in orchestrator.homeostat_status(root):
-        label = f"{row['system']}.{row['name']}"
-        if row["status"] == "done":
-            click.echo(f"  [x] {label:<20} {row.get('completed_at', '')}  {row.get('output', '')}")
-        elif row["status"] == "failed":
-            click.echo(f"  [!] {label:<20} failed — {row.get('error')}")
-        else:
-            click.echo(f"  [ ] {label:<20} never run")
+    _echo_periodic_status(root, orchestrator.HOMEOSTAT_TASKS)
 
 
 @s2_homeostat.command(name="run")
@@ -229,17 +253,7 @@ def s2_homeostat_run(ctx, step):
     """Run homeostat-scan -> homeostat -> homeostat-render, in order, unconditionally."""
     config = ctx.obj["config"]
     root = paths.homeostat_root(config)
-    summary = orchestrator.run_homeostat(root, config, step=step)
-
-    click.echo(f"\nDone: {len(summary['done'])}, Failed: {len(summary['failed'])}")
-    for label in summary["done"]:
-        click.echo(f"  [x] {label}")
-    for label in summary["failed"]:
-        click.echo(f"  [!] {label}")
-    if summary["complete"]:
-        click.echo("Homeostat chain complete.")
-    if summary["failed"]:
-        sys.exit(1)
+    _run_periodic_command(root, config, orchestrator.HOMEOSTAT_TASKS, step, "Homeostat chain complete.")
 
 
 @click.group(name="newsletter", help="System 1D's monthly newsletter pipeline (not book-scoped) — see ADR 008")
@@ -253,14 +267,7 @@ def s2_newsletter_status(ctx):
     """Show each newsletter stage's last recorded outcome."""
     root = paths.newsletter_root(ctx.obj["config"])
     click.echo(f"Newsletter ({root})\n")
-    for row in orchestrator.newsletter_status(root):
-        label = f"{row['system']}.{row['name']}"
-        if row["status"] == "done":
-            click.echo(f"  [x] {label:<20} {row.get('completed_at', '')}  {row.get('output', '')}")
-        elif row["status"] == "failed":
-            click.echo(f"  [!] {label:<20} failed — {row.get('error')}")
-        else:
-            click.echo(f"  [ ] {label:<20} never run")
+    _echo_periodic_status(root, orchestrator.NEWSLETTER_TASKS)
 
 
 @s2_newsletter.command(name="run")
@@ -270,17 +277,7 @@ def s2_newsletter_run(ctx, step):
     """Run newsletter-scan -> newsletter -> newsletter-track, in order, unconditionally."""
     config = ctx.obj["config"]
     root = paths.newsletter_root(config)
-    summary = orchestrator.run_newsletter(root, config, step=step)
-
-    click.echo(f"\nDone: {len(summary['done'])}, Failed: {len(summary['failed'])}")
-    for label in summary["done"]:
-        click.echo(f"  [x] {label}")
-    for label in summary["failed"]:
-        click.echo(f"  [!] {label}")
-    if summary["complete"]:
-        click.echo("Newsletter chain complete.")
-    if summary["failed"]:
-        sys.exit(1)
+    _run_periodic_command(root, config, orchestrator.NEWSLETTER_TASKS, step, "Newsletter chain complete.")
 
 
 s2.add_command(s2_homeostat)
