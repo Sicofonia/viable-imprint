@@ -331,12 +331,19 @@ def s3():
 def s3_dashboard(ctx, book_slug):
     """Show captured cost/duration metrics — one book, or the whole portfolio."""
     config = ctx.obj["config"]
+    books_dir = Path(config.get("books_dir", "books"))
 
     if book_slug:
         root = _resolve_book_root(config, book_slug)
         summary = dashboard.book_summary(root)
+        # Duration outliers are peer-compared across the whole portfolio
+        # (ADR 010) — same task name on every other book — so the flags have
+        # to be computed against every book's summary, not just this one.
+        flags = dashboard.deviation_flags(dashboard.portfolio_summary(books_dir), config)
+        duration_flags = {key: vals for (slug, key), vals in flags["duration"].items() if slug == book_slug}
+
         click.echo(f"Book: {book_slug}\n")
-        click.echo(f"{'Task':<24}  {'Duration':>8}  {'Provider/Model':<32}  {'Usage':<22}  {'Cost':>10}")
+        click.echo(f"{'Task':<24}  {'Duration':>10}  {'Provider/Model':<32}  {'Usage':<22}  {'Cost':>10}")
         for key, entry in sorted(summary["tasks"].items()):
             if entry.get("status") not in ("done", "stale"):
                 continue
@@ -351,7 +358,10 @@ def s3_dashboard(ctx, book_slug):
             else:
                 usage_str = "-"
             label = key if entry["status"] == "done" else f"{key} (stale)"
-            click.echo(f"{label:<24}  {_format_duration(entry.get('duration_seconds')):>8}  "
+            duration_str = _format_duration(entry.get("duration_seconds"))
+            if key in duration_flags:
+                duration_str += " !"
+            click.echo(f"{label:<24}  {duration_str:>10}  "
                        f"{provider_model:<32}  {usage_str:<22}  {_format_cost(entry.get('cost_usd')):>10}")
 
         cost_note = "" if summary["cost_usd"] is not None else " (cost omitted — no pricing configured, or no billable tasks run yet)"
@@ -359,19 +369,26 @@ def s3_dashboard(ctx, book_slug):
                    f"{_format_duration(summary['duration_seconds'])} compute time, "
                    f"{_format_cost(summary['cost_usd'])} API cost{cost_note}")
         click.echo(f"In-pipeline span: {_format_span(summary['span_start'], summary['span_end'])}")
+        for key, (value, avg, mult) in sorted(duration_flags.items()):
+            click.echo(f"\nFlagged: {key} — {_format_duration(value)} is {mult:.1f}x the portfolio "
+                       f"average for this task ({_format_duration(avg)})")
         return
 
-    books_dir = Path(config.get("books_dir", "books"))
     summaries = dashboard.portfolio_summary(books_dir)
     if not summaries:
         click.echo(f"No books found under {books_dir}/")
         return
 
+    flags = dashboard.deviation_flags(summaries, config)
+
     click.echo(f"Portfolio: {len(summaries)} book{'s' if len(summaries) != 1 else ''}\n")
-    click.echo(f"{'Book':<20}  {'Tasks done':<12}  {'API cost':<12}  {'Compute time':<14}  {'In-pipeline span'}")
+    click.echo(f"{'Book':<20}  {'Tasks done':<12}  {'API cost':<14}  {'Compute time':<14}  {'In-pipeline span'}")
     for s in summaries:
         done_str = f"{s['tasks_done']}/{s['tasks_total']}"
-        click.echo(f"{s['slug']:<20}  {done_str:<12}  {_format_cost(s['cost_usd']):<12}  "
+        cost_str = _format_cost(s["cost_usd"])
+        if s["slug"] in flags["cost"]:
+            cost_str += " !"
+        click.echo(f"{s['slug']:<20}  {done_str:<12}  {cost_str:<14}  "
                    f"{_format_duration(s['duration_seconds']):<14}  {_format_span(s['span_start'], s['span_end'])}")
 
     total_done = sum(s["tasks_done"] for s in summaries)
@@ -383,6 +400,10 @@ def s3_dashboard(ctx, book_slug):
 
     click.echo(f"\nTotals: {_format_cost(total_cost)} API cost, {total_done} tasks completed, "
                f"avg {_format_cost(avg_cost)}/title, avg compute time {_format_duration(avg_duration)}/title")
+
+    for slug, (value, avg, mult) in sorted(flags["cost"].items()):
+        click.echo(f"\nFlagged: {slug} — API cost {_format_cost(value)} is {mult:.1f}x "
+                   f"the portfolio average ({_format_cost(avg)})")
 
 
 cli.add_command(s3)

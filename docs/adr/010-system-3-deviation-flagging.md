@@ -1,6 +1,6 @@
 # ADR 010 — System 3: Deviation Flagging (Portfolio Outliers)
 
-**Status:** Proposed. Not yet implemented — for review before work starts.
+**Status:** Implemented. Built and tested against synthetic ledger data — see "Implementation notes" for a real mathematical bug found in this ADR's own original design (self-inclusion in the average) and corrected before shipping.
 
 ---
 
@@ -30,19 +30,29 @@ Both reuse data `lib/dashboard.py` already computes (`portfolio_summary()`'s lis
 
 ```python
 # lib/dashboard.py
-_MIN_SAMPLE = 3  # below this, an "average" is too noisy to flag against — see point 4
+_MIN_SAMPLE = 3  # below this, a peer average is too noisy to flag against — see point 4
+
+
+def _peer_average(values: dict, exclude: str) -> float:
+    """Mean of every value except `exclude`'s own — NOT the portfolio average
+    including the candidate itself. See point 6: self-inclusion turned out to
+    make flagging mathematically impossible at this ADR's own default
+    numbers, found during implementation, not assumed correct here."""
+    peers = [v for s, v in values.items() if s != exclude]
+    return sum(peers) / len(peers) if peers else 0.0
 
 
 def _task_duration_baseline(summaries: list) -> dict:
-    """task_key -> every completed duration for that task across the whole
-    portfolio (done/stale, ADR 009 — a stale entry's last real duration is
-    still a real data point about that task's typical cost, same reasoning
-    dashboard.py already applies to cost/duration totals)."""
+    """task_key -> {slug: duration} for every book that's completed that task
+    (done/stale, ADR 009 — a stale entry's last real duration is still a real
+    data point about that task's typical cost, same reasoning dashboard.py
+    already applies to cost/duration totals). Slug-keyed so each candidate's
+    peer average can exclude its own value."""
     by_task = {}
     for s in summaries:
         for key, entry in s["tasks"].items():
             if entry.get("status") in ("done", "stale") and entry.get("duration_seconds") is not None:
-                by_task.setdefault(key, []).append(entry["duration_seconds"])
+                by_task.setdefault(key, {})[s["slug"]] = entry["duration_seconds"]
     return by_task
 
 
@@ -50,8 +60,8 @@ def deviation_flags(summaries: list, config: dict) -> dict:
     """Cyberstride-style outlier flags (ADR 010) — a human sees these only
     when they run `s3 dashboard`, never pushed or alerted (this project's
     standing "no background process" rule, ADR 003). Returns
-    {"cost": {slug: (value, average, multiplier)},
-     "duration": {(slug, task_key): (value, average, multiplier)}} —
+    {"cost": {slug: (value, peer_average, multiplier)},
+     "duration": {(slug, task_key): (value, peer_average, multiplier)}} —
     empty dicts if `s3.deviation` isn't configured, or a sample is too small.
     """
     settings = config.get("s3", {}).get("deviation")
@@ -59,14 +69,13 @@ def deviation_flags(summaries: list, config: dict) -> dict:
         return {"cost": {}, "duration": {}}
 
     cost_flags = {}
-    known_costs = [s["cost_usd"] for s in summaries if s["cost_usd"] is not None]
-    if len(known_costs) >= _MIN_SAMPLE:
-        avg_cost = sum(known_costs) / len(known_costs)
-        threshold = settings.get("cost_multiplier")
-        if threshold and avg_cost > 0:
-            for s in summaries:
-                if s["cost_usd"] is not None and s["cost_usd"] > threshold * avg_cost:
-                    cost_flags[s["slug"]] = (s["cost_usd"], avg_cost, s["cost_usd"] / avg_cost)
+    known_costs = {s["slug"]: s["cost_usd"] for s in summaries if s["cost_usd"] is not None}
+    threshold = settings.get("cost_multiplier")
+    if threshold and len(known_costs) >= _MIN_SAMPLE:
+        for slug, value in known_costs.items():
+            peer_avg = _peer_average(known_costs, exclude=slug)
+            if peer_avg > 0 and value > threshold * peer_avg:
+                cost_flags[slug] = (value, peer_avg, value / peer_avg)
 
     duration_flags = {}
     threshold = settings.get("duration_multiplier")
@@ -74,19 +83,19 @@ def deviation_flags(summaries: list, config: dict) -> dict:
         for task_key, durations in _task_duration_baseline(summaries).items():
             if len(durations) < _MIN_SAMPLE:
                 continue
-            avg_duration = sum(durations) / len(durations)
-            if avg_duration <= 0:
-                continue
-            for s in summaries:
-                entry = s["tasks"].get(task_key)
-                if entry and entry.get("duration_seconds", 0) > threshold * avg_duration:
-                    duration_flags[(s["slug"], task_key)] = (
-                        entry["duration_seconds"], avg_duration, entry["duration_seconds"] / avg_duration)
+            for slug, value in durations.items():
+                peer_avg = _peer_average(durations, exclude=slug)
+                if peer_avg > 0 and value > threshold * peer_avg:
+                    duration_flags[(slug, task_key)] = (value, peer_avg, value / peer_avg)
 
     return {"cost": cost_flags, "duration": duration_flags}
 ```
 
 `book_summary()`/`portfolio_summary()` themselves are unchanged — flagging is a separate read of their output, not folded into the metrics functions, matching ADR 005's own layering (`metrics.enrich()` is a separate step from capture; this is a separate step from aggregation).
+
+### 6. Self-exclusion isn't optional polish — it's required for the feature to work at all (found during implementation)
+
+The design as originally drafted here computed one portfolio-wide average *including* the candidate being tested, and rejected excluding it (see the "Alternatives Considered" entry on this, corrected below) as an unneeded refinement. Testing against real synthetic numbers during implementation found that was wrong, not just imprecise: with self-inclusion, flagging a value `c` requires `c > k*(a+b+c)/n`, which rearranges to `c*(n-k) > k*(a+b)` — **unsatisfiable for any positive values once `n == k`**. This ADR's own chosen defaults are `_MIN_SAMPLE = 3` and `cost_multiplier: 3.0`, i.e. exactly `n == k` at the minimum sample size — meaning cost flagging could never fire for a 3-book portfolio no matter how extreme the outlier, silently defeating the feature at the exact portfolio size this imprint currently has. `_peer_average()` (point 2) excludes the candidate from the mean it's compared against, which removes the impossibility outright and matches the intuitive meaning of "N× the *rest of* the portfolio" the review asked for in the first place.
 
 ### 3. Config: `s3.deviation`, optional, same pattern as `pricing:`
 
@@ -144,7 +153,7 @@ No flag lines print at all when `s3.deviation` isn't configured, or nothing cros
 - **A hardcoded, non-configurable threshold** — rejected: the review item explicitly named `config.yaml`, "same optional pattern as `pricing:`" — a publisher's sense of what counts as an outlier will differ by portfolio size and genre mix, same reasoning pricing itself is user-maintained rather than a constant.
 - **An automatic notification when a flag fires (email, desktop alert, etc.)** — rejected: this project has a standing "no background process" rule (ADR 003) and every existing signal (task failures, `edited_since_run`, now this) is pull, not push — visible only when a human runs the relevant command. A flag firing between two `s3 dashboard` runs, unseen until the next one, is consistent with how the rest of the CLI already behaves, not a gap being left open.
 - **A separate `s3 flags` command instead of folding into `s3 dashboard`** — rejected: the review explicitly asked for "a flagging pass to `s3 dashboard`," and splitting it would mean checking two commands to get the full picture instead of one; the numbers and the flags on those numbers belong next to each other.
-- **Excluding the flagged item itself from the average it's compared against** — considered (self-inclusion mildly skews a small-portfolio average upward), not adopted for v1: the minimum-sample guard (point 4) plus a conservative default multiplier already keep that skew small in practice, and self-exclusion adds real complexity (a different average per candidate, computed once per row instead of once per portfolio) for a correction that only matters at exactly the portfolio sizes the sample guard is already screening out. Worth revisiting only if real use shows it producing visibly wrong flags.
+- **Excluding the flagged item itself from the average it's compared against** — originally considered and rejected here as an unneeded refinement ("self-inclusion mildly skews a small-portfolio average upward... immaterial at the conservative default multiplier"). **That reasoning was wrong, not just imprecise, and was corrected during implementation once tested against real numbers** (point 6): self-inclusion doesn't mildly skew the result, it makes flagging mathematically impossible at this ADR's own default `_MIN_SAMPLE`/`cost_multiplier` (both 3) — no value could ever cross the threshold at the smallest supported portfolio size. Self-exclusion shipped instead, per-candidate peer averages computed via `_peer_average()`. Left in this list, corrected rather than deleted, since the original mistaken reasoning is worth keeping visible as the reason this changed.
 - **Making the minimum-sample size configurable alongside the multipliers** — rejected: it's a noise guard, not a business threshold a publisher has any real reason to tune; keeping it a documented constant keeps the config surface to exactly the two numbers the review named.
 
 ---
@@ -159,14 +168,28 @@ No flag lines print at all when `s3.deviation` isn't configured, or nothing cros
 **Harder / needs care:**
 - Flags are peer-comparison, not plan-comparison — a portfolio where *every* book is expensive for a legitimate reason (e.g. consistently long manuscripts) will never flag anything, since there's no external "the plan says X" figure to compare against. This is a real, accepted limit, not an oversight (point 1) — worth remembering when reading a quiet dashboard as "nothing costs too much" rather than "nothing costs more than *usual*."
 - The minimum-sample guard means a young portfolio (fewer than 3 books, or fewer than 3 completions of a given task) sees no flags at all, by design — not a bug if a publisher notices flags "start working" only after their third or fourth book.
-- Self-inclusion in the average (point 5 of Alternatives) means one book's own outlier cost mildly pulls up the average it's compared against — a real book already at 4x the *true* peer average might display as flagged at "3.7x," not 4.0x. Immaterial at the conservative default multiplier, worth knowing if a publisher tunes the multiplier very tight.
+- Peer averages are now per-candidate (point 6) rather than one shared portfolio average — a small, deliberate cost in simplicity (one `_peer_average()` call per row instead of one mean computed once) for correctness that turned out not to be optional. Worth remembering if this is ever ported elsewhere: the "obvious" simpler version (one shared average) looks equivalent at a glance and isn't.
+
+---
+
+## Implementation notes (2026-07-21)
+
+Built and tested against synthetic ledger data (three disposable scratch books, `books/dev-scratch-{a,b,c}/`, with `manifest.record_task()` called directly to write controlled `done` entries — no real LLM calls needed, since this feature is pure analysis over already-captured numbers, not new capture; matches the ADR's own checklist allowance for "a synthetic ledger edit, if a real slow call isn't practical"). Scratch books deleted afterward, not committed.
+
+### 7. The self-inclusion bug (point 6) — found on the very first real test, before any other verification
+
+The first thing tested was the most basic case: three books, one ($0.109) clearly and deliberately ~3.5x the other two's costs (~$0.03, ~$0.033). It didn't flag. Worked the algebra by hand against the actual numbers (shown in point 6) before touching any other code, confirmed the impossibility was structural (`n == k` at the ADR's own defaults), fixed it with per-candidate peer exclusion, and re-ran the identical scenario — flagged correctly at 3.5x. Every other checklist item was verified only after this fix landed, since a broken cost-flag mechanism would have made every downstream test meaningless.
+
+### 8. Everything else matched the design as drafted
+
+Duration flagging (`s1b.cleanup` deliberately set to 60s against ~11s peers, correctly flagged at 5.5x in the per-book view); no flags at all with `s3.deviation` absent from config; no flags with fewer than 3 books (2-book slice of the same real summaries, no crash); both dashboard views render the inline `!` marker and trailing `Flagged: ...` line exactly as designed. No other bugs found.
 
 ---
 
 ## Implementation Checklist
 
-- [ ] Add `_task_duration_baseline()` and `deviation_flags()` to `lib/dashboard.py` (point 2)
-- [ ] Add the optional `s3.deviation` block (`cost_multiplier`, `duration_multiplier`) to `config.example.yaml`, with a comment clarifying these are peer-comparison multipliers, not a budget (point 3)
-- [ ] Wire `deviation_flags()` into `pipeline.py`'s `s3_dashboard` command: inline `!` marker plus a trailing "Flagged: ..." line per flag, in both the portfolio view and the per-book view (point 5)
-- [ ] End-to-end test against real/disposable scratch data: at least 3 books with deliberately different costs, confirm the outlier book flags and the others don't; confirm a task deliberately made to run long (or a synthetic ledger edit, if a real slow call isn't practical) flags correctly at the task level; confirm no flag lines print when `s3.deviation` is absent from config, and confirm behavior with fewer than 3 books (no flags, not a crash)
-- [ ] Update README (System 3 section, and a note in Setup alongside the existing `pricing:` optionality note)
+- [x] Add `_task_duration_baseline()` and `deviation_flags()` to `lib/dashboard.py` (point 2) — corrected to per-candidate peer exclusion (point 6) after the point-7 finding
+- [x] Add the optional `s3.deviation` block (`cost_multiplier`, `duration_multiplier`) to `config.example.yaml`, with a comment clarifying these are peer-comparison multipliers, not a budget (point 3) — also added to the user's real `config.yaml` for end-to-end testing
+- [x] Wire `deviation_flags()` into `pipeline.py`'s `s3_dashboard` command: inline `!` marker plus a trailing "Flagged: ..." line per flag, in both the portfolio view and the per-book view (point 5)
+- [x] End-to-end test against synthetic scratch data: three books with deliberately different costs, confirmed the outlier book flags and the others don't (after the point-7 fix); confirmed a synthetic long-duration entry flags correctly at the task level; confirmed no flag lines print when `s3.deviation` is absent from config, and confirmed correct no-crash behavior with fewer than 3 books
+- [x] Update README (System 3 section, Setup note alongside `pricing:`, and the "Check what it cost" running-pipeline subsection)
