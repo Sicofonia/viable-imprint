@@ -23,6 +23,12 @@ def update(book_dir: Path, **kwargs) -> None:
             "record_task()/mark_stale(), never update(); an engine writing "
             "it directly would silently desync s2's view of reality."
         )
+    if "sales" in kwargs:
+        raise ValueError(
+            "'sales' is an append-only, deduped ledger (ADR 011) — write it "
+            "via record_sale(), never update(); a blind overwrite would lose "
+            "every previously-ingested reporting period."
+        )
     data = load(book_dir)
     data.update(kwargs)
     save(book_dir, data)
@@ -55,3 +61,27 @@ def mark_stale(book_dir: Path, key: str, invalidated_by: str) -> None:
     if entry and entry.get("status") == "done":
         tasks[key] = {**entry, "status": "stale", "invalidated_by": invalidated_by}
         save(book_dir, data)
+
+
+def record_sale(book_dir: Path, entries: list) -> tuple:
+    """Append new sales entries to manifest.yaml's `sales:` block — deduped
+    on `(platform, period_start, period_end)` within this one book's own
+    file (`isbn` is implicit: every entry passed in here has already been
+    filtered to this book's own ISBN by the caller, so it isn't re-stored
+    per entry) — so re-ingesting the same export twice is a no-op, not
+    double-counted revenue. See ADR 011. Returns (added_count, skipped_count).
+    """
+    data = load(book_dir)
+    sales = data.setdefault("sales", [])
+    existing = {(e.get("platform"), e.get("period_start"), e.get("period_end")) for e in sales}
+    added = 0
+    for entry in entries:
+        key = (entry.get("platform"), entry.get("period_start"), entry.get("period_end"))
+        if key in existing:
+            continue
+        sales.append(entry)
+        existing.add(key)
+        added += 1
+    if added:
+        save(book_dir, data)
+    return added, len(entries) - added

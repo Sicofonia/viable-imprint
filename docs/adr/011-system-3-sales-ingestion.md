@@ -1,6 +1,6 @@
 # ADR 011 — System 3: Sales Ingestion (Revenue and Reported Margin)
 
-**Status:** Proposed. Not yet implemented — for review before work starts.
+**Status:** Implemented. Built and tested end-to-end against synthetic CSVs matching both shipped adapters' expected column shapes — see "Implementation notes" for what was verified and the honest caveat about real-world column names.
 
 ---
 
@@ -99,7 +99,7 @@ sales:
     ingested_at: "2026-07-21T09:04:02"
 ```
 
-Deduped on `(platform, isbn, period_start, period_end)` before appending — re-ingesting the same export a second time (a publisher re-downloading a report they already processed) is a no-op, not double-counted revenue. This is structurally the newsletter's tracking-list pattern (ADR 008: flat, append-only, checked before appending), not the run-state ledger's pattern (ADR 004/009: one entry per key, overwritten) — sales data is cumulative history by nature, a task's completion status is not.
+Deduped on `(platform, period_start, period_end)` before appending — `isbn` isn't part of the dedup key stored per entry, since every entry in one book's own `sales:` block already belongs to that book's one ISBN by construction (filtered before this point); within a single book's file this is equivalent to keying on `(platform, isbn, period_start, period_end)`, just without a redundant constant field on every entry. Re-ingesting the same export a second time (a publisher re-downloading a report they already processed) is a no-op, not double-counted revenue. This is structurally the newsletter's tracking-list pattern (ADR 008: flat, append-only, checked before appending), not the run-state ledger's pattern (ADR 004/009: one entry per key, overwritten) — sales data is cumulative history by nature, a task's completion status is not.
 
 ### 4. Where ingestion lives: System 3's first real task — and a real, named CLI wrinkle
 
@@ -161,15 +161,37 @@ A book with any `sales:` entries gets two new columns; a book with none shows `-
 
 ---
 
+## Implementation notes (2026-07-21)
+
+Built and tested end-to-end against a disposable scratch book (`books/sales-scratch/`, deleted afterward, not committed) and synthetic CSVs constructed to match each shipped adapter's expected header row (no real IngramSpark/KDP account available to pull an actual export from during this session).
+
+### 7. The "real headers must be verified" caveat is not resolved by this implementation — flagged loudly, not quietly assumed away
+
+Both `providers/sales/ingramspark.py` and `providers/sales/kdp.py` ship with column names that are this project's best-effort understanding of each platform's report shape, carried over unchanged from this ADR's own Decision section — **not** confirmed against a real, currently-live downloaded export, because no such export was available to check against in this session. `providers/sales/base.py` carries this caveat prominently in its module docstring so it isn't missed by a future reader who only opens one of the two format files. **Action for the user, not yet done:** the next time you download a real IngramSpark or KDP report, open it and compare its actual header row against `IngramSparkFormat.matches()`/`KDPFormat.matches()` — if either platform's real columns differ from what's coded here (plausible; both have changed their export formats before per the ADR's own Consequences), detection will either fail loud (the CSV won't match either `matches()` at all) or, worse, silently mis-map a differently-named column that happens to still satisfy `matches()`'s check. `--format` doesn't fix a wrong column mapping, only a failed auto-detection — so this is worth checking deliberately once against a real report, not waiting to notice a `$0.00` revenue figure that should be nonzero.
+
+### 8. KDP's aggregation-by-file design decision, confirmed by testing
+
+KDP's transaction-level shape (multiple rows per ISBN, one per marketplace/date) needed `parse()` to group rows into one entry per `(isbn, currency)` before returning, deriving `period_start`/`period_end` from the earliest/latest transaction date actually present — this was designed but untested in the ADR itself. Tested against a synthetic 4-row CSV (2 USD rows for the target ISBN across two dates, 1 GBP row, 1 row for a different ISBN): correctly produced exactly 2 normalized entries (one per currency) for the target ISBN, correctly summed units/revenue within each currency group, correctly excluded the other ISBN's row, and correctly derived `period_start`/`period_end` as the min/max of the dates actually seen. IngramSpark's simpler one-row-per-period shape needed no aggregation and worked on the first pass.
+
+### 9. Multi-currency margin exclusion confirmed with a real mixed scenario
+
+Ingested both a USD IngramSpark report and a mixed USD/GBP KDP report against the same book: `s3 dashboard` correctly showed `Revenue: 5.00 GBP, 163.50 USD` (grouped, not summed across currencies) and computed reported margin from the USD figure only (`$163.45` against a synthetic `$0.05` API cost) — the GBP revenue correctly did not silently disappear into, or corrupt, the margin figure.
+
+### 10. Everything else matched the design as drafted
+
+Auto-detection correctly picked the right adapter for each of the two synthetic CSVs with no `--format` needed; the explicit `--format` override worked when tested directly; re-ingesting the identical file a second time correctly recorded 0 new entries and reported the duplicate as skipped; a CSV matching neither adapter's `matches()` failed loud with a clear message naming the actual columns seen and the known format names; ingesting against a book with no `isbn:` set failed loud with the exact command to fix it; a direct `manifest.update(root, sales=[...])` call raised `ValueError` as designed. The deliberate command-name shadowing in `pipeline.py` (point 4 — the hand-written `sales-ingest` command overriding `build_system_group()`'s auto-generated one) worked correctly on the first test: `pipeline.py s3 sales-ingest <book_slug> <csv_file>` resolved via the two-argument path, not the single-file-argument one.
+
+---
+
 ## Implementation Checklist
 
-- [ ] Add `providers/sales/base.py` (`SalesFormat` interface), `providers/sales/ingramspark.py`, `providers/sales/kdp.py` (real column mappings verified against actual downloaded exports, not assumed from this doc), `providers/sales/__init__.py` (`FORMATS`, `detect()`)
-- [ ] Add `lib/manifest.py`: `set_isbn`-equivalent write path (or confirm plain `update()` suffices for `isbn`, since it's not a protected key); `record_sale(book_dir, entries)` — dedup on `(platform, isbn, period_start, period_end)`, append-only
-- [ ] Extend `manifest.update()`'s ADR 009 guard to also reject a direct `sales=` kwarg (point 5)
-- [ ] Add `engines/sales_ingest.py` (`CLI_ARG` irrelevant here since the CLI command is hand-written, not `_build_command()`-generated — see point 4): read CSV, `providers.sales.detect()` or explicit `--format`, normalize, filter to the book's own `isbn:`, dedup-append via `record_sale()`
-- [ ] Add `systems/s3/tasks.yaml` declaring `sales-ingest` (engine + any default params)
-- [ ] Add `pipeline.py book set-isbn <book_slug> <isbn>` command
-- [ ] Convert `pipeline.py`'s `s3` group to the mixed `build_system_group()` + hand-written pattern (point 4); add the hand-written `s3 sales-ingest <book_slug> <csv_file> [--format]` command reusing `_resolve_book_root()`
-- [ ] Extend `lib/dashboard.py`'s `book_summary()`/`portfolio_summary()` with revenue-by-currency and reported-margin fields; extend `pipeline.py`'s `s3 dashboard` rendering (both views) with the new, explicitly-labeled columns (point 6)
-- [ ] End-to-end test: real or realistic sample CSVs in both IngramSpark's and KDP's actual export shapes (obtain or closely approximate real headers during implementation), confirm auto-detection picks the right adapter for each; confirm `--format` override works; confirm re-ingesting the same file twice doesn't double-count; confirm a CSV matching neither adapter fails loud with a clear message; confirm `s3 dashboard` shows revenue/margin only for books with sales data and `-` otherwise; confirm a direct `manifest.update(root, sales=[...])` call raises
-- [ ] Update README (System 3 section, command reference table, a new "Record what a title actually earned" subsection in Running the Pipeline, and a note that `providers/sales/` is where a publisher adds support for another platform)
+- [x] Add `providers/sales/base.py` (`SalesFormat` interface), `providers/sales/ingramspark.py`, `providers/sales/kdp.py`, `providers/sales/__init__.py` (`FORMATS`, `detect()`, `get()`) — column mappings are a best-effort starting point, NOT verified against a real downloaded export (point 7); flagged prominently in code, not silently assumed correct
+- [x] Add `lib/manifest.py`: `record_sale(book_dir, entries)` — dedup on `(platform, period_start, period_end)` within one book's own file (`isbn` is implicit, not re-stored per entry — simplification from the ADR's stated `(platform, isbn, period_start, period_end)`, equivalent within a single book's manifest); plain `update()` confirmed sufficient for `isbn` (not a protected key)
+- [x] Extended `manifest.update()`'s ADR 009 guard to also reject a direct `sales=` kwarg (point 5)
+- [x] Add `engines/sales_ingest.py`: read CSV, `providers.sales.detect()` or explicit `--format`, normalize, filter to the book's own `isbn:`, dedup-append via `record_sale()`, write a human-readable receipt file under `s3/sales-ingest/<date>/` (an addition beyond the ADR's own sketch — gives the same on-disk audit trail every other scan-type engine already provides)
+- [x] Add `systems/s3/tasks.yaml` declaring `sales-ingest`
+- [x] Add `pipeline.py book set-isbn <book_slug> <isbn>` command (new `book` command group)
+- [x] Converted `pipeline.py`'s `s3` group to the mixed `build_system_group()` + hand-written pattern (point 4); added the hand-written `s3 sales-ingest <book_slug> <csv_file> [--format]` command, which deliberately overrides the auto-generated single-file-argument version `build_system_group()` produces from `systems/s3/tasks.yaml` (Click's `Group.add_command()` just overwrites the dict entry — confirmed working, not just assumed, point 10)
+- [x] Extended `lib/dashboard.py`'s `book_summary()` with `revenue_by_currency`/`reported_margin_usd`; extended `pipeline.py`'s `s3 dashboard` rendering (both views) with the new, explicitly-labeled columns/lines (point 6)
+- [x] End-to-end test: synthetic CSVs matching both adapters' expected shapes (point 8, 9); confirmed auto-detection, `--format` override, dedup-on-re-ingest, loud failure on an unrecognized CSV, loud failure on a missing ISBN, and the `sales=` guard raising — all as designed (point 10)
+- [x] Update README (Open Source intro, `providers/`/`engines/`/`systems/` architecture sections, command reference table, Setup, and a new "Record what a title actually earned" subsection in Running the Pipeline)

@@ -33,34 +33,65 @@ def _total_task_count() -> int:
     )
 
 
+def _revenue_by_currency(root: Path) -> dict:
+    """Sum of manifest.yaml's `sales:` entries (ADR 011), grouped by
+    currency — deliberately not blended into one number: no FX conversion
+    is attempted (see ADR 011, point 6), so a book selling in more than one
+    currency shows more than one figure rather than one falsely-precise total.
+    """
+    sales = manifest.load(root).get("sales", [])
+    totals = {}
+    for entry in sales:
+        currency = entry.get("currency", "USD")
+        totals[currency] = round(totals.get(currency, 0.0) + (entry.get("revenue") or 0), 2)
+    return totals
+
+
 def book_summary(root: Path) -> dict:
     """One book's aggregated metrics: tasks done/total, total compute time,
     total API cost (None if no task in this book has a known cost — either
-    nothing's run yet, or no pricing is configured), and the in-pipeline span
+    nothing's run yet, or no pricing is configured), the in-pipeline span
     (earliest to latest `completed_at`) — a proxy for cycle time, not the
-    full acquisition-to-shelf number `vsm.md` describes (see ADR 005, point 7).
+    full acquisition-to-shelf number `vsm.md` describes (see ADR 005, point 7)
+    — and, since ADR 011, revenue-by-currency and a *reported* margin.
 
     Counts `stale` (ADR 009) alongside `done`: S2's `stale` means "no longer
     trusted as current," which matters for readiness, not for S3's job here —
     the compute time and API cost were genuinely incurred either way, and
     excluding them the moment an upstream task re-runs would make a book's
     reported spend silently drop.
+
+    `reported_margin_usd` is USD revenue minus tracked API cost ONLY — not
+    `vsm.md`'s full gross-margin-per-title metric (design, freelance
+    editorial time, ISBN fees, and print cost are not tracked anywhere in
+    this project). `None` if there's no USD revenue on record, even if
+    there's revenue in another currency — netting a different currency's
+    revenue against a USD cost figure would be a real number that looks
+    precise and isn't (ADR 011, point 6).
     """
     ledger = _book_scoped_ledger(root)
     completed = [e for e in ledger.values() if e.get("status") in ("done", "stale")]
 
     known_costs = [e["cost_usd"] for e in completed if e.get("cost_usd") is not None]
     timestamps = sorted(e["completed_at"] for e in completed if e.get("completed_at"))
+    cost_usd = round(sum(known_costs), 6) if known_costs else None
+
+    revenue_by_currency = _revenue_by_currency(root)
+    reported_margin_usd = None
+    if "USD" in revenue_by_currency and cost_usd is not None:
+        reported_margin_usd = round(revenue_by_currency["USD"] - cost_usd, 2)
 
     return {
         "slug": root.name,
         "tasks_done": len(completed),
         "tasks_total": _total_task_count(),
         "duration_seconds": round(sum(e.get("duration_seconds", 0) or 0 for e in completed), 2),
-        "cost_usd": round(sum(known_costs), 6) if known_costs else None,
+        "cost_usd": cost_usd,
         "span_start": timestamps[0] if timestamps else None,
         "span_end": timestamps[-1] if timestamps else None,
         "tasks": ledger,
+        "revenue_by_currency": revenue_by_currency,
+        "reported_margin_usd": reported_margin_usd,
     }
 
 
