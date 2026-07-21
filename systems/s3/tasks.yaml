@@ -1,0 +1,11 @@
+# System 3's first real task (ADR 011) — everything else in s3 (`dashboard`)
+# is hand-written, read-only aggregation with no task of its own. This one
+# task declaration exists so sales-ingest flows through the same
+# lib.task_loader.run_task() ledger-recording hook every other task uses —
+# but its actual CLI command is hand-written in pipeline.py, not generated
+# by build_system_group(), since its input is an external download, not a
+# file already inside a book's folder. See docs/adr/011-system-3-sales-ingestion.md,
+# point 4.
+tasks:
+  - name: sales-ingest
+    engine: sales_ingest

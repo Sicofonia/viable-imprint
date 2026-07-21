@@ -29,7 +29,8 @@ import click
 import yaml
 from dotenv import load_dotenv
 
-from lib import dashboard, homeostat, orchestrator, paths
+from lib import dashboard, homeostat, manifest, orchestrator, paths
+from lib import task_loader
 from lib.task_loader import build_system_group
 
 load_dotenv()  # reads .env into os.environ before any provider is instantiated
@@ -95,6 +96,34 @@ def init(ctx, book_slug):
 
     click.echo(f"Created: {book_root}/")
     click.echo(f"  Place your source .txt file in: {book_root / 's1b' / 'source'}/")
+
+
+# ---------------------------------------------------------------------------
+# book — small, explicit commands for per-book facts nobody should mistype
+# or that need setting after init (an ISBN is usually assigned well into
+# production, not at init time). See docs/adr/011-system-3-sales-ingestion.md,
+# point 2 — this is deliberately NOT part of marketing_metadata.yaml (free-
+# form, human-facing marketing copy) or a hand-edit to manifest.yaml.
+# ---------------------------------------------------------------------------
+
+@click.group(name="book", help="Per-book facts and bootstrap commands")
+def book():
+    pass
+
+
+@book.command(name="set-isbn")
+@click.argument("book_slug")
+@click.argument("isbn")
+@click.pass_context
+def book_set_isbn(ctx, book_slug, isbn):
+    """Record a book's ISBN — the join key System 3's sales-ingest (ADR 011)
+    matches royalty report rows against."""
+    root = _resolve_book_root(ctx.obj["config"], book_slug)
+    manifest.update(root, isbn=isbn)
+    click.echo(f"Recorded ISBN {isbn} for {book_slug}")
+
+
+cli.add_command(book)
 
 
 # ---------------------------------------------------------------------------
@@ -290,10 +319,16 @@ cli.add_command(s2)
 
 
 # ---------------------------------------------------------------------------
-# System 3 — Performance Monitoring. Hand-written like s2: read-only
-# aggregation over the run-state ledger, no tasks of its own. Deliberately
-# reporting-only — no resource allocation, budget tracking, or decisions.
-# See docs/adr/005-system-3-performance-monitoring.md.
+# System 3 — Performance Monitoring. `dashboard` is hand-written, read-only
+# aggregation over the run-state ledger — deliberately reporting-only, no
+# resource allocation, budget tracking, or decisions (ADR 005). Since
+# ADR 011, S3 also owns one real, manifest-driven task (`sales-ingest`),
+# mixing both shapes in one group — same mixed pattern `s5` already uses
+# (ADR 007 point 5), except here it's the *task-declared* command that's
+# hand-written (its input is an external download, not a file already
+# inside a book's folder — see docs/adr/011-system-3-sales-ingestion.md,
+# point 4), and `dashboard` that stays hand-written for the opposite reason
+# (it was never task-shaped to begin with).
 # ---------------------------------------------------------------------------
 
 def _format_duration(seconds: float) -> str:
@@ -310,6 +345,21 @@ def _format_cost(cost_usd) -> str:
     return f"${cost_usd:.6f}" if cost_usd < 0.01 else f"${cost_usd:.3f}"
 
 
+def _format_margin(margin_usd) -> str:
+    if margin_usd is None:
+        return "-"
+    sign = "-" if margin_usd < 0 else ""
+    return f"{sign}${abs(margin_usd):.2f}"
+
+
+def _format_revenue(revenue_by_currency: dict) -> str:
+    if not revenue_by_currency:
+        return "-"
+    # Grouped by currency, not summed across them (ADR 011, point 6) — no
+    # FX conversion is attempted anywhere in this project.
+    return ", ".join(f"{amount:.2f} {currency}" for currency, amount in sorted(revenue_by_currency.items()))
+
+
 def _format_span(start_iso: str, end_iso: str) -> str:
     if not start_iso:
         return "no runs yet"
@@ -320,12 +370,10 @@ def _format_span(start_iso: str, end_iso: str) -> str:
     return f"{start} -> {end} ({label})"
 
 
-@click.group(name="s3", help="System 3 — Performance Monitoring (metrics dashboard)")
-def s3():
-    pass
+_s3_group = build_system_group("s3", "System 3 — Performance Monitoring (metrics dashboard)")
 
 
-@s3.command(name="dashboard")
+@_s3_group.command(name="dashboard")
 @click.argument("book_slug", required=False)
 @click.pass_context
 def s3_dashboard(ctx, book_slug):
@@ -369,6 +417,10 @@ def s3_dashboard(ctx, book_slug):
                    f"{_format_duration(summary['duration_seconds'])} compute time, "
                    f"{_format_cost(summary['cost_usd'])} API cost{cost_note}")
         click.echo(f"In-pipeline span: {_format_span(summary['span_start'], summary['span_end'])}")
+        if summary["revenue_by_currency"]:
+            click.echo(f"Revenue: {_format_revenue(summary['revenue_by_currency'])}")
+            click.echo(f"Reported margin (revenue minus tracked API cost only): "
+                       f"{_format_margin(summary['reported_margin_usd'])}")
         for key, (value, avg, mult) in sorted(duration_flags.items()):
             click.echo(f"\nFlagged: {key} — {_format_duration(value)} is {mult:.1f}x the portfolio "
                        f"average for this task ({_format_duration(avg)})")
@@ -382,14 +434,18 @@ def s3_dashboard(ctx, book_slug):
     flags = dashboard.deviation_flags(summaries, config)
 
     click.echo(f"Portfolio: {len(summaries)} book{'s' if len(summaries) != 1 else ''}\n")
-    click.echo(f"{'Book':<20}  {'Tasks done':<12}  {'API cost':<14}  {'Compute time':<14}  {'In-pipeline span'}")
+    click.echo(f"{'Book':<20}  {'Tasks done':<12}  {'API cost':<14}  {'Compute time':<14}  "
+               f"{'Revenue':<16}  {'Margin (API)':<12}  {'In-pipeline span'}")
     for s in summaries:
         done_str = f"{s['tasks_done']}/{s['tasks_total']}"
         cost_str = _format_cost(s["cost_usd"])
         if s["slug"] in flags["cost"]:
             cost_str += " !"
         click.echo(f"{s['slug']:<20}  {done_str:<12}  {cost_str:<14}  "
-                   f"{_format_duration(s['duration_seconds']):<14}  {_format_span(s['span_start'], s['span_end'])}")
+                   f"{_format_duration(s['duration_seconds']):<14}  "
+                   f"{_format_revenue(s['revenue_by_currency']):<16}  "
+                   f"{_format_margin(s['reported_margin_usd']):<12}  "
+                   f"{_format_span(s['span_start'], s['span_end'])}")
 
     total_done = sum(s["tasks_done"] for s in summaries)
     known_costs = [s["cost_usd"] for s in summaries if s["cost_usd"] is not None]
@@ -406,7 +462,35 @@ def s3_dashboard(ctx, book_slug):
                    f"the portfolio average ({_format_cost(avg)})")
 
 
-cli.add_command(s3)
+# Deliberately re-registers "sales-ingest" on `_s3_group`, overriding the
+# single-positional-file command `build_system_group()` already generated
+# for it from systems/s3/tasks.yaml (Click's Group.add_command() just
+# overwrites the dict entry — later registration wins, no error). That
+# auto-generated version would resolve root by walking up from the CSV's
+# own path (paths.book_root()), which can never work here: the CSV is an
+# external download, not a file inside any book folder. See
+# docs/adr/011-system-3-sales-ingestion.md, point 4.
+@_s3_group.command(name="sales-ingest")
+@click.argument("book_slug")
+@click.argument("csv_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--format", "format_", default=None,
+              help="Force a specific platform format instead of auto-detecting from the CSV's header row.")
+@click.pass_context
+def s3_sales_ingest(ctx, book_slug, csv_file, format_):
+    """Ingest a manually-downloaded royalty/sales CSV for one book.
+
+    Unlike every other task's command, this one names the book explicitly
+    (book_slug first) rather than resolving it by walking up from the input
+    file — the CSV is an external download with no book folder anywhere in
+    its ancestry.
+    """
+    config = ctx.obj["config"]
+    root = _resolve_book_root(config, book_slug)
+    task = next(t for t in task_loader.load_system_tasks("s3") if t["name"] == "sales-ingest")
+    task_loader.run_task(root, config, "s3", task, input_file=Path(csv_file).resolve(), format=format_)
+
+
+cli.add_command(_s3_group)
 
 
 # ---------------------------------------------------------------------------
