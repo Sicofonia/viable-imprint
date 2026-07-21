@@ -32,7 +32,7 @@ The pipeline is organised in four layers:
 
 **`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods. `providers/sales/` (ADR 011) is shaped a little differently, since it's plural rather than singular — a publisher accumulates royalty reports from however many platforms they actually sell through, so a format is auto-detected per file (`detect(header_row)`) rather than picked once via config.
 
-**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), the System 3 dashboard aggregation (`lib/dashboard.py`), and shared data access for the System 5 homeostat pipeline (`lib/homeostat.py` — finding System 4's latest briefing, reading/writing the decision log).
+**`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), the System 3 dashboard aggregation (`lib/dashboard.py`), shared data access for the System 5 homeostat pipeline (`lib/homeostat.py` — finding System 4's latest briefing, reading/writing the decision log), the System 5 policy-drift check (`lib/policy_check.py` — hashing `docs/vsm.md`'s policy subsection against a marker stored in the prompt file), and the System 5 candidate calibration log (`lib/candidates.py`).
 
 **`engines/`** — the generic execution logic, shared across every system: `llm_text` (chunk input, call an LLM with a given prompt file — reused by thirteen different tasks across three systems, each just pointing it at a different prompt), `translation` (chunk input, call a translation provider), `odt_format` (render markup to `.odt`), `metadata_doc` (assemble a document from bibliographic facts with no LLM call at all), `feed_scan` (pull new items from a curated watchlist of external sources — RSS/Atom feeds, Project Gutenberg's bulk catalog, and an imprint's own catalog page — no LLM call), `homeostat_scan` (gather System 3/4/decision-log data into one file, no LLM call), `homeostat_render` (render the final self-contained dashboard HTML, no LLM call), `newsletter_scan` (gather this month's production activity, notes, and non-repetition tracking lists into one file, no LLM call), `newsletter_track` (check/record the featured explorer and dish, write the final clean copy, no LLM call), `sales_ingest` (parse a manually-downloaded royalty CSV via a pluggable `providers/sales/` format adapter, dedup-append matching revenue to the book's manifest, no LLM call). Engines are written once and reused by any task that needs that shape of work.
 
@@ -57,6 +57,8 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 **System 3 also owns its first real task, `sales-ingest` (ADR 011)** — `pipeline.py s3 sales-ingest <book_slug> <csv_file> [--format]` reads a royalty/sales report a publisher manually downloaded from a distribution platform, auto-detects which platform it came from (IngramSpark, KDP — a `--format` override exists if detection fails), and appends new, deduped revenue entries to that book's `manifest.yaml`. This is the one task whose CLI command is hand-written rather than auto-generated: its input is an external download, not a file already inside the book's folder, so the book has to be named explicitly (`book_slug` first), the same shape `s2`'s own commands already use. **Adding support for another platform is one new file in `providers/sales/`** (mirroring `providers/llm/`/`providers/translation/`'s shape), registered in one list — nothing about which platform a publisher sells through is hardcoded into the engine. Matching a report row back to a book needs a real ISBN on record first: `pipeline.py book set-isbn <book_slug> <isbn>`. `s3 dashboard` then shows revenue (grouped by currency — no FX conversion is attempted) and a *reported* margin, explicitly labeled as API cost only, not `vsm.md`'s full production-cost metric. See `docs/adr/011-system-3-sales-ingestion.md`.
 
 **`pipeline.py s5 evaluate`** is System 5 (Identity, Values and Policy) — the one manifest-driven task whose prompt is committed rather than gitignored, since it's substantively the same editorial policy already public in `docs/vsm.md`. It reuses `engines/llm_text.py` completely unchanged: the "policy agent" is just `vsm.md`'s System 5 section reformatted as a system prompt. Given a candidate's description (title, author, approximate date, subject, what's known about rights/source quality), it returns an advisory verdict — fits / borderline / doesn't fit — reasoned against the thematic scope and non-negotiable values in `docs/vsm.md`. It does **not** decide anything: no candidates database, no automatic book creation, nothing gated. **`pipeline.py candidate new <slug>`** is the bootstrap (mirroring `init`, but for a candidate rather than a book) — it does no System 1A work itself (identifying or sourcing a candidate is still entirely a human task today); it just creates the folder a brief goes in. See `docs/adr/006-system-5-policy-agent.md`, especially point 8, on why that distinction is worth keeping clear.
+
+**Two hardening additions (ADR 013):** `pipeline.py s5 check-policy-sync [--update]` hashes `docs/vsm.md`'s `### Editorial Policy (Constitutive Criteria)` subsection and compares it against a marker stored in `prompts/s5/policy_evaluation_task.txt`'s own leading comment — a stale prompt after `vsm.md`'s policy is revised now fails loud instead of silently arbitrating against an outdated policy. `pipeline.py candidate record-decision <slug> <decision>` closes the loop on a verdict: it reads `s5 evaluate`'s own `<verdict>` tag (the one piece of that output anything parses — the other three sections stay plain prose) and appends both the agent's verdict and the Director's actual decision to `candidates/calibration.yaml`, building the evidence base for when a review loop can eventually be relaxed.
 
 **`pipeline.py s2 homeostat`** drives System 5's other advisory artifact — the homeostat dashboard, Beer's System 3/4 conflict-arbitration role given a concrete shape (`docs/adr/007-system5-homeostat-dashboard.md`). Three tasks (`homeostat-scan` → `homeostat` → `homeostat-render`) gather System 3's portfolio snapshot, System 4's latest briefing, and a decision log into a single self-contained `homeostat.html` — no server, no scheduler, a plain HTML file you open in a browser. Unlike book production, this pipeline is periodic, not one-and-done: `s2 homeostat run` re-executes the whole chain every time, producing a fresh dated snapshot, rather than skipping steps already marked `done` the way `s2 run <book_slug>` does. `pipeline.py s5 log-decision "<tension>" "<decision>"` appends one line to the decision log the dashboard displays — the one genuinely human step, kept as a plain two-argument command rather than a form.
 
@@ -84,6 +86,8 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 | `s4 content-strategy` | System 4 | Latest briefing | One grounded article brief in `intelligence/s4/content-strategy/<date>/` |
 | `s1d article-draft` | System 1D | A `content-strategy` brief | Full Markdown article in `intelligence/s1d/article-draft/<date>/` — not book-scoped, lands inside `intelligence/`, not a book |
 | `s5 evaluate` | System 5 | A candidate's description in `candidates/s1a/briefs/` (create with `candidate new <slug>`) | Advisory fit/borderline/reject verdict in `candidates/s5/evaluate/` — no book involved, no automatic decision |
+| `s5 check-policy-sync` | System 5 | Nothing (reads `docs/vsm.md` + the prompt directly) | Pass/fail check on stdout/exit code — no file written |
+| `candidate record-decision` | System 5 | A candidate's `s5 evaluate` verdict | Appends one entry to `candidates/calibration.yaml` |
 | `s5 homeostat-scan` | System 5 | Nothing (reads S3/S4/decisions directly) | Combined snapshot in `homeostat/s5/homeostat-scan/<date>/` — no LLM call |
 | `s5 homeostat` | System 5 | That scan | Tensions/tradeoffs narrative in `homeostat/s5/homeostat/<date>/` |
 | `s5 homeostat-render` | System 5 | That narrative + fresh S3/S4/decision data | Self-contained `homeostat.html` in `homeostat/s5/homeostat-render/<date>/` — no LLM call |
@@ -148,6 +152,7 @@ See `docs/adr/003-system-4-strategic-intelligence.md` for why System 4 needed th
 ```
 candidates/
 ├── manifest.yaml
+├── calibration.yaml                  # flat, append-only — `candidate record-decision` appends here (ADR 013)
 ├── s1a/
 │   └── briefs/
 │       └── <candidate-slug>.txt      # you write this by hand
@@ -459,6 +464,22 @@ uv run python pipeline.py s5 evaluate candidates/s1a/briefs/life-of-a-nomad.txt
 ```
 
 This writes a verdict (fits / borderline / doesn't fit) to `candidates/s5/evaluate/life-of-a-nomad.txt`, reasoned against the editorial policy in `docs/vsm.md`. It's advisory only — nothing here creates a book, updates a database, or decides anything for you; if you agree with the verdict and want to proceed, run `pipeline.py init life-of-a-nomad` yourself, same manual step as always. See `docs/adr/006-system-5-policy-agent.md`, and note point 8 in particular: this doesn't automate finding or vetting candidates, only checking one you've already found against policy.
+
+**Close the loop once you've actually decided (ADR 013):**
+
+```bash
+uv run python pipeline.py candidate record-decision life-of-a-nomad acquired
+```
+
+Records the agent's verdict alongside what you actually did (`acquired`, `declined`, `deferred` — any free text) in `candidates/calibration.yaml`. On its own this doesn't do anything with the data; after enough real candidates accumulate, it's the first real evidence for deciding whether `s5 evaluate` can eventually be trusted with less oversight.
+
+**Whenever `docs/vsm.md`'s editorial policy is revised, check the prompt didn't silently fall out of sync:**
+
+```bash
+uv run python pipeline.py s5 check-policy-sync
+```
+
+Compares a stored hash inside `prompts/s5/policy_evaluation_task.txt` against `docs/vsm.md`'s current `### Editorial Policy (Constitutive Criteria)` subsection. If they've drifted, it fails loud and tells you so — update the prompt to match the new policy, then run `s5 check-policy-sync --update` to record the new sync point. See `docs/adr/013-system-5-hardening.md`.
 
 **Confront System 3 against System 4 and get an actual dashboard, not another document (System 5):**
 

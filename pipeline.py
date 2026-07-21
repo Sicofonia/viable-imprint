@@ -21,6 +21,7 @@ Output always lands under the VSM system that produced it (s1b/, s1d/, ...),
 mirroring this CLI's own nested command structure — only manifest.yaml stays
 at the book root, since it's shared across every system.
 """
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -29,7 +30,7 @@ import click
 import yaml
 from dotenv import load_dotenv
 
-from lib import dashboard, homeostat, manifest, orchestrator, paths
+from lib import candidates, dashboard, homeostat, manifest, orchestrator, paths, policy_check
 from lib import task_loader
 from lib.task_loader import build_system_group
 
@@ -150,6 +151,36 @@ def s5_log_decision(ctx, tension, decision):
     root = paths.homeostat_root(ctx.obj["config"])
     homeostat.record_decision(root, tension, decision)
     click.echo(f"Recorded: {root / 'decisions.yaml'}")
+
+
+@_s5_group.command(name="check-policy-sync")
+@click.option("--update", "do_update", is_flag=True,
+              help="Rewrite the stored sync hash after confirming the prompt was updated by hand.")
+def s5_check_policy_sync(do_update):
+    """Check prompts/s5/policy_evaluation_task.txt against docs/vsm.md's
+    Editorial Policy subsection (ADR 013) — catches a stale prompt after
+    vsm.md's policy is revised."""
+    current = policy_check.current_hash()
+    if do_update:
+        policy_check.update_stored_hash(current)
+        click.echo(f"Updated stored hash to {current}.")
+        return
+
+    stored = policy_check.stored_hash()
+    if stored == current:
+        click.echo(f"In sync (hash {current}).")
+        return
+
+    click.echo(
+        f"OUT OF SYNC — docs/vsm.md's Editorial Policy subsection has changed since this prompt was last synced.\n"
+        f"  Stored hash:  {stored or '(none recorded)'}\n"
+        f"  Current hash: {current}\n"
+        f"Review docs/vsm.md's \"### Editorial Policy (Constitutive Criteria)\" subsection against "
+        f"prompts/s5/policy_evaluation_task.txt, update the prompt if the policy actually changed, "
+        f"then run `pipeline.py s5 check-policy-sync --update`.",
+        err=True,
+    )
+    sys.exit(1)
 
 
 cli.add_command(_s5_group)
@@ -518,6 +549,26 @@ def candidate_new(ctx, candidate_slug):
 
     click.echo(f"Write the candidate's description in: {brief_path}")
     click.echo(f"Then run: pipeline.py s5 evaluate {brief_path}")
+
+
+@candidate.command(name="record-decision")
+@click.argument("candidate_slug")
+@click.argument("decision")
+@click.pass_context
+def candidate_record_decision(ctx, candidate_slug, decision):
+    """Record what the Director actually decided, against s5 evaluate's own
+    verdict, for calibration (candidates/calibration.yaml). DECISION is free
+    text — e.g. acquired, declined, deferred."""
+    root = paths.candidates_root(ctx.obj["config"])
+    verdict_path = root / "s5" / "evaluate" / f"{candidate_slug}.txt"
+    if not verdict_path.exists():
+        raise click.ClickException(
+            f"No verdict found at {verdict_path} — run `s5 evaluate` for this candidate first."
+        )
+    match = re.search(r"<verdict>\s*(.*?)\s*</verdict>", verdict_path.read_text(encoding="utf-8"))
+    agent_verdict = match.group(1) if match else "(sin etiqueta <verdict>)"
+    candidates.record_calibration(root, candidate_slug, agent_verdict, decision)
+    click.echo(f"Recorded: {root / 'calibration.yaml'} ({agent_verdict} -> {decision})")
 
 
 cli.add_command(candidate)
