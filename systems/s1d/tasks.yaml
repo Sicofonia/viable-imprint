@@ -114,3 +114,16 @@ tasks:
     engine: newsletter_track
     input: s1d.newsletter
     book_scoped: false
+
+  # Outbound content amplification (ADR 012) — not book-scoped, not chained
+  # into any pipeline (s2 or periodic): a real editorial choice point, run
+  # manually against whichever s4 content-strategy brief the Director
+  # actually wants drafted. `input:` here is documentation only, since this
+  # task is never orchestrated (unlike the newsletter trio, it's not driven
+  # by any s2 command either).
+  - name: article-draft
+    engine: llm_text
+    prompt: prompts/s1d/article_draft_task.txt
+    max_chars: 100000
+    input: s4.content-strategy
+    book_scoped: false

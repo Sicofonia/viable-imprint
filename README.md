@@ -39,8 +39,8 @@ The pipeline is organised in four layers:
 **`systems/`** — one subfolder per VSM system, each holding a single `tasks.yaml` manifest. Only systems with implemented tasks exist here; a system is added when its first task is written. Each manifest entry names a task, the engine it uses, and that engine's parameters (typically a prompt file):
 
 - `systems/s1b/tasks.yaml` — System 1B (Editorial Production): cleanup, translate, ortho, copyedit, format
-- `systems/s1d/tasks.yaml` — System 1D (Publication and Marketing): brief, synopsis, story-map, one-pager, press-dossier, trailer-storyboard, goodreads-profile, metadata (see `docs/adr/002-marketing-brief-pipeline.md` for why marketing is a chain of small tasks rather than one big one). Also `newsletter-scan`, `newsletter`, `newsletter-track` (see `docs/adr/008-system1d-newsletter.md`) — a periodic monthly newsletter, driven by `s2 newsletter run` rather than run by hand; see below
-- `systems/s4/tasks.yaml` — System 4 (Strategic Intelligence): scan, briefing (see `docs/adr/003-system-4-strategic-intelligence.md`) — unlike S1B/S1D, System 4 isn't about any one book, so it doesn't live under `books/` at all; see below
+- `systems/s1d/tasks.yaml` — System 1D (Publication and Marketing): brief, synopsis, story-map, one-pager, press-dossier, trailer-storyboard, goodreads-profile, metadata (see `docs/adr/002-marketing-brief-pipeline.md` for why marketing is a chain of small tasks rather than one big one). Also `newsletter-scan`, `newsletter`, `newsletter-track` (see `docs/adr/008-system1d-newsletter.md`) — a periodic monthly newsletter, driven by `s2 newsletter run` rather than run by hand; see below. Also `article-draft` (see `docs/adr/012-system-4-amplification-outbound.md`) — drafts a full article from one of System 4's `content-strategy` briefs; `book_scoped: false`, run manually, not chained into anything
+- `systems/s4/tasks.yaml` — System 4 (Strategic Intelligence): scan, briefing (see `docs/adr/003-system-4-strategic-intelligence.md`) — unlike S1B/S1D, System 4 isn't about any one book, so it doesn't live under `books/` at all; see below. Also `content-strategy` (see `docs/adr/012-system-4-amplification-outbound.md`) — reads the latest briefing and drafts one grounded article-angle brief; System 1D's `article-draft` (below) turns it into an actual article
 - `systems/s5/tasks.yaml` — System 5 (Identity, Values and Policy): evaluate (see `docs/adr/006-system-5-policy-agent.md`) — reads a candidate text's description and returns an advisory fit/borderline/reject verdict against the editorial policy in `docs/vsm.md`. Not book-scoped either; see below. Also `homeostat-scan`, `homeostat`, `homeostat-render` (see `docs/adr/007-system5-homeostat-dashboard.md`) — a periodic S3/S4 confrontation dashboard, driven by `s2 homeostat run` rather than run by hand; see below
 - `systems/s3/tasks.yaml` — System 3 (Performance Monitoring): `sales-ingest` (see `docs/adr/011-system-3-sales-ingestion.md`) — System 3's first real task; unlike every other entry here, its CLI command is hand-written, not generated from this file, since its input is an external download rather than a file already inside a book's folder — see below
 
@@ -81,6 +81,8 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 | `s1d metadata` | System 1D | Brief + `marketing_metadata.yaml` | Bibliographic reference sheet in `s1d/metadata/es/` — pure data assembly, no LLM call |
 | `s4 scan` | System 4 | Nothing (external sources per `systems/s4/sources.yaml`) | New items since the last scan in `intelligence/s4/scan/<date>/` — no LLM call, no book involved at all |
 | `s4 briefing` | System 4 | That day's scan | Strategic intelligence briefing in `intelligence/s4/briefing/<date>/` |
+| `s4 content-strategy` | System 4 | Latest briefing | One grounded article brief in `intelligence/s4/content-strategy/<date>/` |
+| `s1d article-draft` | System 1D | A `content-strategy` brief | Full Markdown article in `intelligence/s1d/article-draft/<date>/` — not book-scoped, lands inside `intelligence/`, not a book |
 | `s5 evaluate` | System 5 | A candidate's description in `candidates/s1a/briefs/` (create with `candidate new <slug>`) | Advisory fit/borderline/reject verdict in `candidates/s5/evaluate/` — no book involved, no automatic decision |
 | `s5 homeostat-scan` | System 5 | Nothing (reads S3/S4/decisions directly) | Combined snapshot in `homeostat/s5/homeostat-scan/<date>/` — no LLM call |
 | `s5 homeostat` | System 5 | That scan | Tensions/tradeoffs narrative in `homeostat/s5/homeostat/<date>/` |
@@ -432,6 +434,17 @@ uv run python pipeline.py s4 scan && uv run python pipeline.py s4 briefing intel
 ```
 
 `scan` is resilient to a single source failing (a feed timing out, a site returning an error) — it warns and continues with the rest rather than aborting the whole run. See `docs/adr/003-system-4-strategic-intelligence.md` for the full design, including why Project Gutenberg needed its bulk catalog file rather than its RSS feed, and several further prompt-reliability lessons beyond the ones ADR 002 already found.
+
+**Turn a briefing into a draft blog article (System 4 → System 1D, ADR 012):**
+
+```bash
+uv run python pipeline.py s4 content-strategy intelligence/s4/briefing/<date>/combined.txt
+uv run python pipeline.py s1d article-draft intelligence/s4/content-strategy/<date>/combined.txt
+```
+
+`content-strategy` reads the latest briefing and drafts one article angle, grounded in and citing a specific signal from it — System 4 deciding where to point the amplifier. `article-draft` then writes the actual article from that one brief — System 1D turning the crank. Both are ordinary, manually-run tasks, not chained into `s2 run` or any periodic pipeline: not every angle is worth turning into a published piece, and that choice is a real editorial call, not something this pipeline auto-advances past. `article-draft`'s output lands at `intelligence/s1d/article-draft/<date>/` — nested inside System 4's own `intelligence/` root rather than a new one, since its input file already lives inside a folder with its own `manifest.yaml` and the ordinary book-root lookup just finds it there, the same cross-system pattern `s1d brief` already uses one level up. Both prompts carry an explicit rule against inventing specific bibliographic facts (titles, authors, years) beyond whatever the brief actually supplies — found necessary the hard way; see the ADR's implementation notes.
+
+**Note on scope:** this closes only the outbound half of System 4's amplification loop — there's no automated measurement yet of whether a published article actually reaches anyone (impressions, clicks, visits). The review that raised this suggested Google Search Console for that; this project deliberately doesn't integrate it, an explicit editorial call about third-party infrastructure dependency, not a technical rejection. A self-hosted alternative (Umami or Plausible Community Edition) is the likelier direction whenever this gets picked back up — see `docs/adr/012-system-4-amplification-outbound.md`, point 4, for the reasoning and the open TO-DO.
 
 **Get a first-pass opinion on whether a candidate text fits your catalogue (System 5):**
 

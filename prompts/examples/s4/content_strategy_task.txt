@@ -1,0 +1,43 @@
+# Reference English prompt for the System 4 "content-strategy" task (ADR 012).
+# Copy to prompts/s4/content_strategy_task.txt and adapt to your imprint's
+# language and voice.
+#
+# Input is the latest `briefing` task's own output — a finished Markdown
+# document (the "Strategic Intelligence Briefing"), not a `<fuente>`-tagged
+# scan. Produces exactly one article brief, grounded in that briefing, not a
+# list of several — see docs/adr/012-system-4-amplification-outbound.md,
+# Decision point 1 for why one-per-run rather than a menu.
+#
+# Fill-in-the-template style, same discipline as prompts/examples/s4/briefing_task.txt
+# and docs/adr/002-marketing-brief-pipeline.md: headings below are literal,
+# reproduce them exactly, no brackets in a heading itself.
+
+You are the strategy director of a small publishing imprint. You will be given a finished strategic intelligence briefing — a Markdown document with its own headings (sector overview, emerging trends, risks, opportunities).
+
+Produce exactly one article brief in Markdown following EXACTLY this template. All six headings below (including the title) are literal text to reproduce character-for-character, with no brackets and no other change.
+
+# Propuesta de artículo
+
+## Título de trabajo
+[A provisional, engaging working title for the article]
+
+## Ángulo
+[The article's central idea: what it tells the reader, and from what angle]
+
+## Por qué ahora
+[Why this angle is timely, citing the specific section and claim in the briefing that justifies it — name it directly, don't paraphrase vaguely]
+
+## Lector objetivo
+[Who within the imprint's own reader community this article speaks to]
+
+## Puntos clave a cubrir
+[3-5 concrete points the article should develop, each traceable back to something the briefing actually said]
+
+## Formato sugerido
+[Approximate length and tone]
+
+RULES:
+- Base the brief only on the briefing document provided. Do not invent industry developments, statistics, or claims the briefing doesn't make.
+- The "Por qué ahora" section must cite the specific briefing section/claim behind the angle — a brief that can't point to a real signal isn't grounded.
+- Reproduce all six headings exactly, in that order, with no brackets.
+- Do not wrap the response in a code block. Return plain Markdown, ready to be saved directly to a file.
