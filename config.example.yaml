@@ -33,6 +33,17 @@ translation:
   pricing:
     per_million_characters: 20.00
 
+s3:
+  # Optional — System 3's `s3 dashboard` (ADR 010) uses this to flag
+  # portfolio outliers. Omit either field, or the whole block, to skip that
+  # flagging entirely; the dashboard still shows every number either way.
+  # Both are peer-comparison multipliers against the current portfolio's own
+  # average, not a budget: "this book/task costs N times more than the rest
+  # of the portfolio typically does," nothing more.
+  deviation:
+    cost_multiplier: 3.0
+    duration_multiplier: 3.0
+
 books_dir: books
 
 # Root folder for System 4 (Strategic Intelligence) — not book-scoped, so it

@@ -73,3 +73,72 @@ def portfolio_summary(books_dir: Path) -> list:
         for book_root in sorted(books_dir.iterdir())
         if book_root.is_dir() and (book_root / "manifest.yaml").exists()
     ]
+
+
+_MIN_SAMPLE = 3  # below this, a peer average is too noisy to flag against — see ADR 010 point 4
+
+
+def _peer_average(values: dict, exclude: str) -> float:
+    """Mean of every value except `exclude`'s own — deliberately NOT the
+    portfolio average including the candidate itself. With self-inclusion
+    and a sample right at `_MIN_SAMPLE` (3) compared at the default 3x
+    multiplier, no value can *ever* cross the threshold: flagging c requires
+    c > k*(a+b+c)/n, i.e. c*(n-k) > k*(a+b), which is unsatisfiable for any
+    positive a/b once n == k (found by testing against real numbers during
+    implementation — see ADR 010's Implementation notes). Excluding the
+    candidate from its own average removes that impossibility outright.
+    """
+    peers = [v for s, v in values.items() if s != exclude]
+    return sum(peers) / len(peers) if peers else 0.0
+
+
+def _task_duration_baseline(summaries: list) -> dict:
+    """task_key -> {slug: duration} for every book that's completed that task
+    (done/stale, ADR 009 — a stale entry's last real duration is still a real
+    data point about that task's typical cost, same reasoning `book_summary()`
+    already applies to cost/duration totals). Slug-keyed, not a flat list, so
+    each candidate's peer average can exclude its own value (see `_peer_average()`).
+    """
+    by_task = {}
+    for s in summaries:
+        for key, entry in s["tasks"].items():
+            if entry.get("status") in ("done", "stale") and entry.get("duration_seconds") is not None:
+                by_task.setdefault(key, {})[s["slug"]] = entry["duration_seconds"]
+    return by_task
+
+
+def deviation_flags(summaries: list, config: dict) -> dict:
+    """Cyberstride-style outlier flags (ADR 010) — peer-comparison against the
+    rest of the current portfolio, not a budget (this project has no plan/
+    budget figure anywhere). A human sees these only when they run
+    `s3 dashboard`, never pushed or alerted (this project's standing "no
+    background process" rule, ADR 003). Returns
+    {"cost": {slug: (value, peer_average, multiplier)},
+     "duration": {(slug, task_key): (value, peer_average, multiplier)}} —
+    empty dicts if `s3.deviation` isn't configured, or a sample is too small.
+    """
+    settings = config.get("s3", {}).get("deviation")
+    if not settings:
+        return {"cost": {}, "duration": {}}
+
+    cost_flags = {}
+    known_costs = {s["slug"]: s["cost_usd"] for s in summaries if s["cost_usd"] is not None}
+    threshold = settings.get("cost_multiplier")
+    if threshold and len(known_costs) >= _MIN_SAMPLE:
+        for slug, value in known_costs.items():
+            peer_avg = _peer_average(known_costs, exclude=slug)
+            if peer_avg > 0 and value > threshold * peer_avg:
+                cost_flags[slug] = (value, peer_avg, value / peer_avg)
+
+    duration_flags = {}
+    threshold = settings.get("duration_multiplier")
+    if threshold:
+        for task_key, durations in _task_duration_baseline(summaries).items():
+            if len(durations) < _MIN_SAMPLE:
+                continue
+            for slug, value in durations.items():
+                peer_avg = _peer_average(durations, exclude=slug)
+                if peer_avg > 0 and value > threshold * peer_avg:
+                    duration_flags[(slug, task_key)] = (value, peer_avg, value / peer_avg)
+
+    return {"cost": cost_flags, "duration": duration_flags}
