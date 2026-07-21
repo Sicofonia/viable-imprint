@@ -21,7 +21,16 @@ def _book_scoped_ledger(root: Path) -> dict:
 
 
 def _total_task_count() -> int:
-    return sum(len(task_loader.load_system_tasks(s)) for s in BOOK_SYSTEMS)
+    """Book-scoped task count per system, same `book_scoped` filter
+    `orchestrator._load_graph()` applies (ADR 008) — without it, a
+    system whose `tasks.yaml` also declares periodic, non-book tasks
+    (e.g. S1D's `book_scoped: false` newsletter trio) would inflate
+    every book's total by tasks that never actually run against it.
+    """
+    return sum(
+        len([t for t in task_loader.load_system_tasks(s) if t.get("book_scoped", True)])
+        for s in BOOK_SYSTEMS
+    )
 
 
 def book_summary(root: Path) -> dict:
