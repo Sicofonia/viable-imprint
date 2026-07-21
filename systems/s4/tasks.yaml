@@ -8,3 +8,10 @@ tasks:
     prompt: prompts/s4/briefing_task.txt
     # Read the whole combined scan in one call, not chunked.
     max_chars: 100000
+
+  - name: content-strategy
+    engine: llm_text
+    prompt: prompts/s4/content_strategy_task.txt
+    # Read the whole briefing in one call, not chunked. See
+    # docs/adr/012-system-4-amplification-outbound.md.
+    max_chars: 100000

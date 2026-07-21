@@ -1,6 +1,6 @@
 # ADR 012 — System 4: Outbound Amplification (Article Briefs → Drafts)
 
-**Status:** Proposed. Not yet implemented — for review before work starts.
+**Status:** Implemented. Built and tested end-to-end against a real briefing already on disk — see "Implementation notes" for a real, serious hallucination found and fixed before this could ship.
 
 ---
 
@@ -14,7 +14,7 @@ Every automated piece of System 4 built so far (ADR 003) moves in one direction:
 
 `docs/vsm.md` itself doesn't use "amplifier"/"attenuator" — that framing is the review's own, applying Beer's standard vocabulary (an attenuator reduces incoming variety to something manageable; an amplifier increases outgoing variety so the organisation can act on its environment, not just absorb it) to what's already built. `vsm.md` does list, under System 4, *"exploring new formats and channels"* and, under System 1D, *"communication and marketing for each title (social media, newsletter, specialist communities)"* — outbound content marketing is squarely inside what both systems are already meant to do; the pipeline just doesn't do any of it yet beyond the newsletter (ADR 008).
 
-**Explicit, user-directed scope cut for this ADR: outbound only.** The review's own second half — Google Search Console (and, as a fallback, Bing Webmaster Tools) as the inbound gain-measurement source — is deliberately **not** part of this ADR. The user's stated reason: distrust of surveillance-capitalism infrastructure, Google's specifically. This isn't a technical rejection (the review's own technical case for Search Console — free API, no on-site script, no traffic-based pricing — is sound) but a values call, squarely the kind of judgment `vsm.md`'s System 5 reserves for a human, not a default this codebase should reach for just because it's free and well-documented. See "Deferred: inbound gain measurement" below — this stays a real, named gap, not quietly dropped.
+**Explicit, user-directed scope cut for this ADR: outbound only.** The review's own second half — Google Search Console (and, as a fallback, Bing Webmaster Tools) as the inbound gain-measurement source — is deliberately **not** part of this ADR, per the user's explicit direction. This isn't a technical rejection (the review's own technical case for Search Console — free API, no on-site script, no traffic-based pricing — is sound) but an editorial values call about which third parties this imprint's infrastructure should depend on, squarely the kind of judgment `vsm.md`'s System 5 reserves for a human, not a default this codebase should reach for just because it's free and well-documented. See "Deferred: inbound gain measurement" below — this stays a real, named gap, not quietly dropped.
 
 ---
 
@@ -43,7 +43,7 @@ Neither task is wired into `s2 run` or a new periodic `s2`-style command group. 
 
 The amplification loop this ADR closes is genuinely half a loop: it gives System 4 a way to push variety outward (an article, informed by real scanned signal), but nothing measures whether that push landed — no queries, impressions, click-through, or even raw visits per published article. Beer's own point about amplifiers is that they need a matching measurement channel to know if the amplification is doing anything; without one, `content-strategy`/`article-draft` produce content on faith, not signal.
 
-**This is left as an open TO-DO, not silently dropped.** The review's own suggestion (Google Search Console, Bing Webmaster Tools as a same-shape fallback) is rejected here on the user's explicit values grounds, not a technical one — both are free, well-documented, and would have been a small `s4 scan` source addition. **When this gap is revisited, the self-hosted alternative the review itself already named for a related, later concern — Umami or Plausible Community Edition, run on infrastructure the imprint controls rather than a third party's — is the more promising starting point specifically because it doesn't have the same surveillance-capitalism dependency**, not because it's technically superior. Worth designing as its own ADR once actually picked up: it would need the imprint to actually be running one of those (a real deployment decision, not just a config key), and a new `s4 scan` source type reading its API/export rather than Search Console's.
+**This is left as an open TO-DO, not silently dropped.** The review's own suggestion (Google Search Console, Bing Webmaster Tools as a same-shape fallback) is rejected here on the user's explicit values grounds, not a technical one — both are free, well-documented, and would have been a small `s4 scan` source addition. **When this gap is revisited, the self-hosted alternative the review itself already named for a related, later concern — Umami or Plausible Community Edition, run on infrastructure the imprint controls rather than a third party's — is the more promising starting point specifically because it keeps this data on infrastructure the imprint itself controls**, not because it's technically superior. Worth designing as its own ADR once actually picked up: it would need the imprint to actually be running one of those (a real deployment decision, not just a config key), and a new `s4 scan` source type reading its API/export rather than Search Console's.
 
 ---
 
@@ -71,11 +71,31 @@ The amplification loop this ADR closes is genuinely half a loop: it gives System
 
 ---
 
+## Implementation notes (2026-07-21)
+
+Built and tested against `intelligence/s4/briefing/2026-07-04/combined.txt` — a real briefing already on disk from ADR 003's own earlier testing, not a synthetic fixture, and (usefully) the "quiet week, nothing new" case ADR 003's own implementation notes had already flagged as expected behavior.
+
+### 5. A real, serious hallucination found on the first real `article-draft` run — fixed before this could ship
+
+`content-strategy`'s first output was itself correctly grounded: since the briefing reported no news and no trends, it produced a legitimate angle turning that quietness into the article's premise, explicitly citing the briefing's "Resumen del período" and "Tendencias detectadas" sections as its basis — exactly the discipline the prompt asked for. Its "Puntos clave a cubrir" included, generically, "ejemplos concretos de títulos del catálogo de Ecos de Oriente que encajan en este nicho" — a real point, but naming no specific titles, authors, or years, since none were available to it.
+
+`article-draft`'s **first** run against that brief invented five entirely fictional catalog entries to satisfy that point: fake titles (*"El corazón de Asia"*, *"Por las rutas de Samarcanda"*, *"El desierto de los tártaros"*), a garbled author name (*"Aurelio Stein"* — the real explorer already tracked elsewhere in this project's own data, e.g. `newsletter/featured_explorers.yaml`, is **Aurel Stein**), invented publication years, and a fabricated claim that these were never-before-translated works. None of this was in the brief. This is not a cosmetic defect — a fabricated bibliographic fact in a published article is real reputational damage to the imprint, the same class of risk this project has guarded against since ADR 002's "never let the LLM guess an ISBN."
+
+**Root cause and fix:** the prompt's existing "don't introduce ungrounded claims" rule was too general to override the model's own drive to make a vague brief-point ("catalog examples") concrete. Added an explicit, named rule to both `prompts/s1d/article_draft_task.txt` and its English reference: when a key point asks for catalog examples without naming specifics, write about the *kind* of works generically, and never invent a title, author, year, or translation claim not explicitly given. Re-ran the identical brief through the corrected prompt: the second draft stayed correctly generic throughout ("los diarios de aquellos que cartografiaron regiones de Asia Central," "crónicas de quienes... registraron costumbres") with no fabricated specifics anywhere. Confirmed by direct comparison of both drafts, not just a re-read of the prompt.
+
+**Worth carrying forward:** any future prompt whose brief can legitimately contain a vague point ("give examples," "cite specific cases") without supplying the specifics needs this same explicit anti-fabrication rule, not just a general "stay grounded" instruction — a vague instruction plus a capable model is enough to produce a specific, confident, entirely invented fact.
+
+### 6. Everything else matched the design as drafted
+
+`article-draft`'s output correctly landed at `intelligence/s1d/article-draft/2026-07-04/combined.txt` via the ordinary `book_root()` directory-walk, with zero new perpetual root — confirmed directly, not just predicted. Both tasks recorded correctly through the standard `_run_recorded()` ledger hook (duration, cost, provider, model, usage) with no special-casing needed. `dashboard._total_task_count()` stayed at 13 (not 14) after adding `article-draft`, confirming `book_scoped: false` correctly excluded it from System 3's book-scoped task count the same way it already excludes the newsletter trio.
+
+---
+
 ## Implementation Checklist
 
-- [ ] Add `content-strategy` to `systems/s4/tasks.yaml` (`engine: llm_text`)
-- [ ] Write `prompts/s4/content_strategy_task.txt` (real, Spanish) and `prompts/examples/s4/content_strategy_task.txt` (English reference) — one grounded article brief per run, citing which briefing signal(s) it responds to, no invented claims
-- [ ] Add `article-draft` to `systems/s1d/tasks.yaml` (`engine: llm_text`, `book_scoped: false`)
-- [ ] Write `prompts/s1d/article_draft_task.txt` (real, Spanish) and `prompts/examples/s1d/article_draft_task.txt` (English reference) — full Markdown article from one brief, extract-then-expand discipline (only develop what the brief grounds)
-- [ ] End-to-end test: run `s4 content-strategy` against a real (or realistic scratch) `briefing` output, confirm the brief cites real signals from it; run `s1d article-draft` against that brief, confirm the draft stays grounded and doesn't introduce ungrounded specific claims; confirm `article-draft`'s output correctly lands under `intelligence/s1d/article-draft/<date>/` via the existing `book_root()` walk, with no new root created; confirm `s2 status`/`s2 run` on a real book's graph is unaffected (article-draft correctly excluded via `book_scoped: false`)
-- [ ] Update README (System 4 section, System 1D section, command reference table, and an explicit note in whichever section tracks open work that inbound gain measurement is a deliberate, named TO-DO — not forgotten, not silently rejected)
+- [x] Add `content-strategy` to `systems/s4/tasks.yaml` (`engine: llm_text`)
+- [x] Write `prompts/s4/content_strategy_task.txt` (real, Spanish) and `prompts/examples/s4/content_strategy_task.txt` (English reference) — one grounded article brief per run, citing which briefing signal(s) it responds to, no invented claims
+- [x] Add `article-draft` to `systems/s1d/tasks.yaml` (`engine: llm_text`, `book_scoped: false`)
+- [x] Write `prompts/s1d/article_draft_task.txt` (real, Spanish) and `prompts/examples/s1d/article_draft_task.txt` (English reference) — full Markdown article from one brief, extract-then-expand discipline (only develop what the brief grounds); strengthened with an explicit anti-fabrication rule after the point-5 finding
+- [x] End-to-end test: ran `s4 content-strategy` against a real briefing already on disk (the "quiet week" case), confirmed the brief cited real signals from it rather than inventing news; ran `s1d article-draft` against that brief — found and fixed a real hallucinated-catalog-facts bug on the first attempt (point 5), confirmed clean on the second; confirmed `article-draft`'s output landed under `intelligence/s1d/article-draft/<date>/` via the existing `book_root()` walk with no new root created; confirmed `dashboard._total_task_count()` unaffected (still 13, `book_scoped: false` working correctly)
+- [x] Update README (System 4/System 1D architecture sections, command reference table, and a new "Turn a briefing into a draft blog article" subsection in Running the Pipeline with an explicit scope note that inbound gain measurement is a deliberate, named TO-DO — not forgotten, not silently rejected)
