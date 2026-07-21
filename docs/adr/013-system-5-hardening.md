@@ -1,6 +1,6 @@
 # ADR 013 — System 5: Hardening (Policy-Drift Tripwire and Verdict Calibration Log)
 
-**Status:** Proposed. Not yet implemented — for review before work starts.
+**Status:** Implemented. Built and tested end-to-end against real Mistral calls and a real, deliberate `docs/vsm.md` mutation — see "Implementation notes" for a real regex bug found and fixed in `--update`'s own first test.
 
 ---
 
@@ -148,13 +148,27 @@ def candidate_record_decision(ctx, candidate_slug, decision):
 
 ---
 
+## Implementation notes (2026-07-21)
+
+Built and tested end-to-end: real `docs/vsm.md` mutations (reverted via `git checkout` afterward, never committed), and two real Mistral calls against `s5 evaluate` (one in-scope, one out-of-scope candidate, mirroring ADR 006's own original test pair) — disposable test candidates deleted afterward, not committed.
+
+### 8. `update_stored_hash()`'s own regex silently ate a blank line — found on its very first real test, before verifying anything else
+
+`_HASH_LINE`'s original pattern (`r"^# vsm-sync-hash:\s*([0-9a-f]+)\s*$"`, `re.MULTILINE`) looked correct and matched the ADR's own draft — but the trailing `\s*` before `$` matches newline characters too under `MULTILINE`, so `re.sub()` consumed the blank line immediately after the hash line along with it, silently collapsing it into the following paragraph every time `--update` ran. Caught immediately by diffing the file after the very first `--update` test, before trusting the mechanism for anything else. Fixed by narrowing the trailing whitespace class to `[ \t]*` (same-line whitespace only, not `\s*`) — re-tested by mutating `docs/vsm.md`, running `--update`, and confirming the blank line survived this time. Same general lesson as ADR 010's self-inclusion bug: a regex or formula that reads correctly on inspection can still be wrong in a way only running it against real input reveals.
+
+### 9. Both prompt-reliability checks passed cleanly
+
+The `<verdict>` tag survived intact on the first real run for both test candidates, no bracket-wrapping, no paraphrasing, no code-fence wrapping — likely because this prompt already carries the strongest reliability hardening in the project (ADR 006 points 9–10's verbatim-checklist rule), and the tag was added as a small, additive change to an already-robust template rather than a new template from scratch. `s5 check-policy-sync` correctly reported "In sync" against the real, unmodified `docs/vsm.md`; correctly failed loud with both hashes shown when `docs/vsm.md`'s Editorial Policy subsection was deliberately mutated; correctly recovered after `git checkout -- docs/vsm.md` with no lingering state. `candidate record-decision` correctly recorded both real verdicts, correctly failed with a clear message against a nonexistent candidate.
+
+---
+
 ## Implementation Checklist
 
-- [ ] Add `lib/policy_check.py` (`extract_policy_section()`, `current_hash()`, `stored_hash()`)
-- [ ] Add the `# vsm-sync-hash: ...` line to `prompts/s5/policy_evaluation_task.txt`'s leading comment block, computed from the real, current `docs/vsm.md`
-- [ ] Add `pipeline.py s5 check-policy-sync [--update]` to `_s5_group`
-- [ ] Wrap `## Veredicto`'s value in `<verdict>...</verdict>` in `prompts/s5/policy_evaluation_task.txt` and `prompts/examples/s5/policy_evaluation_task.txt`; add a rule noting the tag, matching how every other tagged prompt in this project explains its own tags
-- [ ] Add `lib/candidates.py` (`record_calibration(root, candidate_slug, agent_verdict, human_decision)`), mirroring `lib/homeostat.py`'s `record_decision()`
-- [ ] Add `pipeline.py candidate record-decision <slug> <decision>` to the existing `candidate` group
-- [ ] End-to-end test: confirm `s5 check-policy-sync` passes against the real, freshly-hashed prompt; deliberately edit `docs/vsm.md`'s `### Editorial Policy` subsection (on a disposable copy or reverted after) and confirm the check fails loud and clearly; confirm `--update` correctly rewrites the stored hash; run `s5 evaluate` for a real or disposable candidate and confirm the `<verdict>` tag survives intact across at least two real runs (in-scope and out-of-scope cases, mirroring ADR 006's own original test pair); run `candidate record-decision` against that verdict and confirm `candidates/calibration.yaml` records correctly; confirm `record-decision` fails clearly if no verdict file exists yet
-- [ ] Update README (System 5 section, command reference table, a note in Running the Pipeline about closing the loop on a candidate evaluation)
+- [x] Add `lib/policy_check.py` (`extract_policy_section()`, `current_hash()`, `stored_hash()`, `update_stored_hash()`) — regex fixed per point 8 after testing
+- [x] Add the `# vsm-sync-hash: ...` line to `prompts/s5/policy_evaluation_task.txt`'s leading comment block, computed from the real, current `docs/vsm.md`
+- [x] Add `pipeline.py s5 check-policy-sync [--update]` to `_s5_group`
+- [x] Wrap `## Veredicto`'s value in `<verdict>...</verdict>` in `prompts/s5/policy_evaluation_task.txt` and `prompts/examples/s5/policy_evaluation_task.txt`; add a rule noting the tag, matching how every other tagged prompt in this project explains its own tags
+- [x] Add `lib/candidates.py` (`record_calibration(root, candidate_slug, agent_verdict, human_decision)`), mirroring `lib/homeostat.py`'s `record_decision()`
+- [x] Add `pipeline.py candidate record-decision <slug> <decision>` to the existing `candidate` group
+- [x] End-to-end test: confirmed `s5 check-policy-sync` passes against the real, freshly-hashed prompt; deliberately mutated `docs/vsm.md`'s `### Editorial Policy` subsection and confirmed the check fails loud and clearly, reverted via `git checkout`; confirmed `--update` correctly rewrites the stored hash — found and fixed the point-8 regex bug in this pass; ran `s5 evaluate` for two real candidates (in-scope and out-of-scope) and confirmed the `<verdict>` tag survived intact both times; ran `candidate record-decision` against both real verdicts and confirmed `candidates/calibration.yaml` recorded correctly; confirmed `record-decision` fails clearly against a nonexistent candidate
+- [x] Update README (System 5 section, command reference table, `candidates/` folder structure, `lib/` architecture description, and two new subsections in Running the Pipeline)

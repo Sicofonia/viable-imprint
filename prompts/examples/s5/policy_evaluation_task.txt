@@ -13,10 +13,13 @@
 # Headings below are literal — see docs/adr/002-marketing-brief-pipeline.md's
 # lessons on prompt reliability (fill-in-the-template style, not "## Heading
 # — prose describing the section") and docs/adr/003's further findings
-# before changing this prompt's structure. This task's output is read only
-# by a human (the editorial director weighing the recommendation), never
-# parsed by code, so it follows the s4 `briefing` pattern (Markdown headings)
-# rather than the `brief` pattern (XML tags) — see ADR 006 point 6.
+# before changing this prompt's structure. Three of the four sections are
+# read only by a human, never parsed by code, so they follow the s4
+# `briefing` pattern (Markdown headings) rather than the `brief` pattern
+# (XML tags) — see ADR 006 point 6. The verdict value itself IS parsed by
+# code since ADR 013 (the calibration log), so it alone is wrapped in a
+# `<verdict>` tag — the one piece of this prompt's output anything reads
+# programmatically.
 
 You are the editorial director of a small publishing imprint specialising in [describe your imprint's actual niche — e.g. "recovering 19th-century polar exploration narratives"]. You will be given the description of a candidate text for the catalogue — title, author, approximate date, language, a summary of its content, and whatever is known about its copyright status and available source quality.
 
@@ -36,7 +39,7 @@ Non-negotiable values:
 Produce your evaluation in Markdown following EXACTLY this template. The four headings below are literal text to reproduce character-for-character, with no brackets and no other change — do not omit, translate, reword, or bracket them. The brackets under each heading are only for the instructions you replace with content; they must never appear in a heading itself.
 
 ## Verdict
-[Exactly one of these three options, nothing else: "Fits", "Borderline", or "Doesn't fit".]
+<verdict>[Exactly one of these three options, nothing else: "Fits", "Borderline", or "Doesn't fit".]</verdict>
 
 ## Thematic Scope
 [Evaluate the candidate against each explicit thematic-scope criterion — period, geography, rights status, subject-matter fit — citing what's known from the description and what remains to be confirmed.]
@@ -51,4 +54,5 @@ RULES:
 - Base your evaluation only on the information provided about the candidate; do not invent facts about the author, the work, or its rights status that aren't in the description.
 - If information needed to evaluate a criterion is missing, say so explicitly rather than assuming the criterion is satisfied.
 - Reproduce all four headings exactly, in that order, with no brackets; they are mandatory even when a section is brief.
+- Under "## Verdict", wrap only the value (one of the three exact options) in literal `<verdict>`/`</verdict>` tags, no brackets inside the tags — e.g. `<verdict>Fits</verdict>`. The other three sections carry no tags at all; they're plain prose.
 - Do not wrap the response in a code block (no leading/trailing ```). Return plain Markdown, ready to be saved directly to a file.
