@@ -1,4 +1,6 @@
 import re
+from pathlib import Path
+
 import deepl
 from providers.translation.base import TranslationProvider
 
@@ -32,6 +34,24 @@ class DeepLProvider(TranslationProvider):
             translated = translated[5:-6]
 
         return self._from_xml(translated)
+
+    def translate_document(self, input_path: Path, output_path: Path, source_lang: str, target_lang: str) -> None:
+        """Translate a whole file server-side via DeepL's document-translation
+        endpoint, no chunking. Unlike `translate()`, there is NO tag_handling
+        equivalent for this endpoint — `[i]`/`[sc]` bracket markup is sent as
+        literal text, not specially preserved. Whether it survives is an open,
+        empirically-tested question (see docs/adr for this feature), not
+        assumed here. `self.usage` is updated the same way as `translate()`,
+        from `DocumentStatus.billed_characters`.
+        """
+        status = self._translator.translate_document_from_filepath(
+            input_path,
+            output_path,
+            source_lang=source_lang.upper(),
+            target_lang=target_lang.upper(),
+        )
+        if status.billed_characters is not None:
+            self.usage["characters"] += status.billed_characters
 
     # ------------------------------------------------------------------
     # Internal helpers
