@@ -5,8 +5,17 @@
 # Copy this file to templates/format_styles.yaml and point `template` at
 # your own .odt file. Both that copy and the template itself are gitignored:
 # they're specific to one imprint's book design, not the project's defaults.
+#
+# If you publish in more than one physical format (different trim sizes,
+# paperback vs. hardcover, etc.), name each .odt template after the format it
+# belongs to — e.g. templates/6x9template.odt, templates/hardcover-a5.odt —
+# and set `template:` below to whichever one you use most often. Producing a
+# book in a different format on a given run doesn't need a second copy of
+# this whole file (the named style roles below are usually the same across
+# your own templates) — override just the template with:
+#   pipeline.py s1b format <file> --template templates/hardcover-a5.odt
 
-template: templates/book_template.odt
+template: templates/6x9template.odt
 
 styles:
   chapter_number: "Heading 2"
