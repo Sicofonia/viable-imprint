@@ -30,7 +30,7 @@ Contributions are welcome. If you add a provider, please follow the existing pat
 
 The pipeline is organised in four layers:
 
-**`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods. `providers/sales/` (ADR 011) is shaped a little differently, since it's plural rather than singular — a publisher accumulates royalty reports from however many platforms they actually sell through, so a format is auto-detected per file (`detect(header_row)`) rather than picked once via config.
+**`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods. `providers/sales/` (ADR 011) is shaped a little differently, since it's plural rather than singular — a publisher accumulates royalty reports from however many platforms they actually sell through, so a format is auto-detected per file (`detect(header_row)`) rather than picked once via config. A translation provider can also optionally implement `translate_document()` (currently only `DeepLProvider` does) for a whole-file, no-chunking translation mode — optional and unenforced, same convention as `usage` (ADR 005): a provider that doesn't implement it just doesn't support `s1b translate --document`, checked with `getattr()` at call time, not a required part of the interface.
 
 **`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), the System 3 dashboard aggregation (`lib/dashboard.py`), shared data access for the System 5 homeostat pipeline (`lib/homeostat.py` — finding System 4's latest briefing, reading/writing the decision log), the System 5 policy-drift check (`lib/policy_check.py` — hashing `docs/vsm.md`'s policy subsection against a marker stored in the prompt file), and the System 5 candidate calibration log (`lib/candidates.py`).
 
@@ -69,7 +69,7 @@ Adding a new LLM-driven editorial task to a system requires writing a prompt fil
 | Task | VSM | Input | Output |
 |------|-----|-------|--------|
 | `s1b cleanup` | System 1B | Raw OCR `.txt` in `s1b/source/` | Cleaned `.txt` with `[i]`/`[sc]` markup in `s1b/cleaned/` |
-| `s1b translate` | System 1B | Cleaned `.txt` | Translated `.txt` in `s1b/translated/es/` |
+| `s1b translate` | System 1B | Cleaned `.txt` | Translated `.txt` in `s1b/translated/es/` — chunked text translation by default, or `--document`/`-d` for a provider's whole-document translation (no chunking; requires `translate_document()` support) |
 | `s1b ortho` | System 1B | Translated `.txt` | Orthotypographic corrections in `s1b/ortho/es/` |
 | `s1b copyedit` | System 1B | Ortho-corrected `.txt` | Copy-edited `.txt` in `s1b/copyedit/es/` |
 | `s1b format` | 1B → 1C handoff | Any corrected `.txt` | Formatted `.odt` in `s1b/formatted/` |
@@ -373,6 +373,14 @@ Open `books/life-as-explorer/s1b/cleaned/my-life.txt`, read the first few pages,
 ```bash
 uv run python pipeline.py s1b translate books/life-as-explorer/s1b/cleaned/my-life.txt
 ```
+
+By default this chunks the manuscript into ~50K-character pieces and calls DeepL's *text* translation API once per chunk, converting this project's `[i]`/`[sc]` markup to XML tags first (`tag_handling="xml"`) so italics/small-caps survive the round-trip. Pass `-d`/`--document` to use the provider's *document* translation instead — the whole file in one server-side call, no chunking:
+
+```bash
+uv run python pipeline.py s1b translate books/life-as-explorer/s1b/cleaned/my-life.txt --document
+```
+
+There's no `tag_handling` equivalent for document translation, so `[i]`/`[sc]`/`[FN: ...]` markup is sent as plain literal text rather than specially preserved — tested against DeepL directly and it survived correctly regardless (no XML tag_handling needed in practice), but that's an empirical result for this project's specific bracket conventions and DeepL's current model behavior, not a documented guarantee. `--document` requires a provider that implements `translate_document()` (currently DeepL only — `LibreTranslate` or any future provider that doesn't would fail with a clear error, not a crash) — same provider-agnostic shape as everything else in `providers/`, an *optional* capability rather than a required part of the interface, exactly like `usage` already is (see ADR 005). Worth knowing: `--document` skips this project's own per-chunk accounting entirely, so `s3 dashboard`'s character usage for a `--document` run reflects DeepL's own single billed-character total for the whole file, not per-chunk figures.
 
 **Orthotypographic corrections:**
 
