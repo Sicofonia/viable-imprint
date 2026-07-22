@@ -13,13 +13,14 @@ immediately following short uppercase line is treated as the chapter title.
 The paragraph right after a detected heading gets the "first paragraph"
 style; everything else gets "body".
 
-Inline [i]...[/i] and [sc]...[/sc] markup is left as literal visible text —
-applying that formatting is a deliberate manual step. [FN: ...] footnote
-markup is the one exception: it's converted into a real ODF footnote
-(a proper reference mark plus a separate note body, rendered by the word
-processor at the page bottom/endnotes) rather than left as visible bracket
-text, since ODF has a real, well-supported footnote element and there's no
-reason to leave a publisher to convert those by hand. See `_split_footnotes()`.
+Inline [sc]...[/sc] markup is left as literal visible text — applying that
+formatting is a deliberate manual step. [i]...[/i] and [FN: ...] are the two
+exceptions: [i] becomes a real italic character span, and [FN: ...] becomes
+a real ODF footnote (a proper reference mark plus a separate note body,
+rendered by the word processor at the page bottom/endnotes) — both cases
+where there's a real, well-supported ODF mechanism and no reason to leave a
+publisher to apply that formatting by hand. See `_split_footnotes()` and
+`_split_inline_styles()`.
 """
 import re
 from pathlib import Path
@@ -90,7 +91,7 @@ def write(text: str, output_path: Path, template_path: Path, style_map: dict) ->
 
 def _append_paragraph(doc, text: str, style_name: str, footnotes: _FootnoteCounter) -> None:
     p = P(stylename=style_name)
-    _append_text_with_footnotes(p, text, footnotes)
+    _append_text_with_footnotes(doc, p, text, footnotes)
     doc.text.addElement(p)
 
 
@@ -110,21 +111,22 @@ def _append_first_paragraph(doc, text: str, style_name: str, footnotes: _Footnot
         span.addText(first_word)
         p.addElement(span)
         if rest:
-            _append_text_with_footnotes(p, rest, footnotes)
+            _append_text_with_footnotes(doc, p, rest, footnotes)
     else:
-        _append_text_with_footnotes(p, text, footnotes)
+        _append_text_with_footnotes(doc, p, text, footnotes)
     doc.text.addElement(p)
 
 
-def _append_text_with_footnotes(p, text: str, footnotes: _FootnoteCounter) -> None:
+def _append_text_with_footnotes(doc, p, text: str, footnotes: _FootnoteCounter) -> None:
     """Append `text` to paragraph `p`, converting inline [FN: ...] markup
-    into real ODF footnotes instead of `addText()`'s plain pass-through.
-    [i]/[sc] markup is untouched, still left as literal visible text.
+    into real ODF footnotes and [i]...[/i] into real italic spans, instead
+    of `addText()`'s plain pass-through. [sc] markup is untouched, still
+    left as literal visible text.
     """
     segments = _split_footnotes(text)
     for i, (kind, content) in enumerate(segments):
         if kind == "footnote":
-            p.addElement(_build_footnote(content, footnotes.next()))
+            p.addElement(_build_footnote(doc, content, footnotes.next()))
         elif content:
             # Strip a trailing space directly before a footnote marker so
             # the reference mark sits flush against the preceding word
@@ -133,20 +135,95 @@ def _append_text_with_footnotes(p, text: str, footnotes: _FootnoteCounter) -> No
             # inline with a space before it, e.g. "Tserat [FN: ...]".
             if i + 1 < len(segments) and segments[i + 1][0] == "footnote":
                 content = content.rstrip(" ")
+            _append_inline_styled(doc, p, content)
+
+
+def _append_inline_styled(doc, p, text: str) -> None:
+    """Append `text` to paragraph/footnote-body `p`, converting [i]...[/i]
+    into a real italic character span. [sc] is left as literal visible
+    text, same as before — only [i] is handled here."""
+    for kind, content in _split_inline_styles(text):
+        if not content:
+            continue
+        if kind == "italic":
+            span = Span(stylename=_ensure_italic_style(doc))
+            span.addText(content)
+            p.addElement(span)
+        else:
             p.addText(content)
 
 
-def _build_footnote(body_text: str, number: int):
+def _build_footnote(doc, body_text: str, number: int):
     note = Note(id=f"ftn{number}", noteclass="footnote")
     citation = NoteCitation(label=str(number))
     citation.addText(str(number))
     note.addElement(citation)
     body = NoteBody()
     body_p = P()
-    body_p.addText(body_text)
+    _append_inline_styled(doc, body_p, body_text)
     body.addElement(body_p)
     note.addElement(body)
     return note
+
+
+_INLINE_STYLE_TAGS = {"[i]": ("italic", "[/i]")}
+
+
+def _split_inline_styles(text: str) -> list:
+    """Split `text` into ("text", str)/("italic", str) segments around this
+    project's [i]...[/i] markup (only [i] is converted; [sc] stays literal
+    text, same discipline as everywhere else in this module — see the
+    module docstring). Bounded the same way `_split_footnotes()` is: an
+    opening tag's matching close is only looked for up to the *next*
+    opening tag (of any handled kind) or end of text, so one span can't
+    swallow a following one. An opening tag with no matching close in that
+    range is left as literal text rather than guessed at wrong.
+    """
+    segments = []
+    pos = 0
+    while True:
+        next_tag, next_pos = None, len(text)
+        for tag in _INLINE_STYLE_TAGS:
+            idx = text.find(tag, pos)
+            if idx != -1 and idx < next_pos:
+                next_tag, next_pos = tag, idx
+
+        if next_tag is None:
+            segments.append(("text", text[pos:]))
+            break
+
+        segments.append(("text", text[pos:next_pos]))
+        kind, close_tag = _INLINE_STYLE_TAGS[next_tag]
+        content_start = next_pos + len(next_tag)
+
+        bound = len(text)
+        for tag in _INLINE_STYLE_TAGS:
+            idx = text.find(tag, content_start)
+            if idx != -1 and idx < bound:
+                bound = idx
+
+        close_pos = text.find(close_tag, content_start)
+        if close_pos == -1 or close_pos > bound:
+            segments.append(("text", next_tag))
+            pos = content_start
+            continue
+
+        segments.append((kind, text[content_start:close_pos]))
+        pos = close_pos + len(close_tag)
+
+    return segments
+
+
+def _ensure_italic_style(doc) -> str:
+    """Inject an automatic character style for italics, idempotent."""
+    _NAME = "_vi_italic"
+    for el in doc.automaticstyles.childNodes:
+        if getattr(el, "getAttribute", None) and el.getAttribute("name") == _NAME:
+            return _NAME
+    style = Style(name=_NAME, family="text")
+    style.addElement(TextProperties(fontstyle="italic"))
+    doc.automaticstyles.addElement(style)
+    return _NAME
 
 
 def _split_footnotes(text: str) -> list:
