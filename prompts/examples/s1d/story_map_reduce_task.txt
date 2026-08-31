@@ -1,0 +1,49 @@
+# Reference English prompt for the System 1D "story-map" task's optional
+# reduce step (ADR 014, Decision 2). Copy to
+# prompts/s1d/story_map_reduce_task.txt and adapt to your imprint's language,
+# voice, and business specifics, matching prompts/s1d/story_map_task.txt.
+#
+# Only used when the brief is long enough that `story-map`'s map step chunks
+# it into more than one piece. Each chunk already produced a complete draft
+# following the same six-section template; this prompt's hardest job is
+# merging the per-draft waypoint lists (section 3) into one ordered,
+# deduplicated itinerary spanning the whole journey, in chunk order. Wire it
+# up with `reduce_prompt: prompts/s1d/story_map_reduce_task.txt` alongside
+# `single_chunk: true` in systems/s1d/tasks.yaml. See
+# docs/adr/014-system1d-brief-chunk-overflow-guard.md.
+
+You are a research assistant preparing reference material for a publisher who builds narrative story maps from historical travel books.
+
+This book's brief was long enough to be split into several pieces, and each piece independently produced a complete narrative-map document following the same six-section template, based on only part of the book. You will receive those complete documents, in the same order the book's events occur, delimited like this:
+
+<borrador numero="1" total="N">
+...complete draft...
+</borrador>
+
+Your task is NOT to summarize one draft or pick the best one: it is to merge all of them into ONE final document covering the whole book. Follow exactly this six-section template. The six level-2 headings are literal text to reproduce exactly, with their numbering, EXACTLY ONCE each, in this order — the final document is a single narrative map, never several complete documents concatenated or repeated headings:
+
+## 1. Introduction
+Merge every draft's introduction into one general outline of the whole journey, start to finish. If the book is notable for a specific reason (e.g. it is the first translation into the target language), mention it once.
+
+## 2. Biography
+Merge every draft's biography into one coherent biography section — or one per expedition member, if the journey was made by several named people. If the drafts disagree about some detail, trust whichever version most of them support, and never blend biographical facts from two different people into one biography.
+
+## 3. Journey Waypoints
+Merge the place-name lists from ALL drafts into a single ordered list, one per line, respecting the journey's chronological order: first the waypoints from draft 1, then draft 2, and so on, preserving each draft's own internal order. If the same place name appears at the end of one draft and the start of the next (the point where the source was split), include it only once, not twice. Keep the "Place Name (modern name)" format wherever a draft already used it; do not add a modern name no draft proposed.
+
+## 4. Chronology
+Merge every draft's chronology into a single chronological list from the start of the book to the end, removing duplicate entries where two drafts describe the same event.
+
+## 5. Temples and Ruins
+Merge every draft's bullets into a single list, removing duplicates where the same temple, monastery, or ruin appears in more than one draft.
+
+## 6. Ethnic Groups
+Merge every draft's bullets into a single list, removing duplicates where the same group appears in more than one draft.
+
+RULES:
+- The final document must contain each of the six headings exactly once, in this order and with this numbering — never repeat them or concatenate several complete documents.
+- Before returning your answer, check the final list in section 3 for merge duplicates: if the same place name, or the same block of several consecutive place names, appears twice in a row with no different place name between the two occurrences, that is almost certainly a mistake merging the end of one draft with the start of the next — remove the second occurrence. This is different from a place the journey genuinely visits twice at different points in time, with other place names appearing between the two visits — that repetition is legitimate and must be kept.
+- Do not invent place names, people, dates, or events not present in any of the drafts.
+- If, after merging every draft, a section genuinely has nothing to report, write a short note under that heading rather than omitting the section or inventing content.
+- Do not generate maps, coordinates, or image files — this is a text reference document only.
+- Do not wrap the response in a code block (no leading/trailing ```). Return plain Markdown.

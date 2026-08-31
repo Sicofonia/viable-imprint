@@ -50,16 +50,31 @@ def _strip_code_fence(text: str) -> str:
     return match.group(1).strip() if match else text
 
 
+def _wrap_draft(index: int, total: int, text: str) -> str:
+    """Delimit one map-step draft for the reduce call. XML-style tags, not a
+    Markdown-heading-like "=== Borrador N ===" marker — `feed_scan._wrap_source`
+    already found that the latter visually primes a model to paraphrase its
+    own fixed output headings into the same descriptive style instead of
+    reproducing them literally (ADR 003 point 10). Several reduce prompts
+    (press-dossier, one-pager, story-map) must reproduce fixed headings, so
+    the same risk applies here and the same fix is reused.
+    """
+    return f'<borrador numero="{index}" total="{total}">\n{text}\n</borrador>'
+
+
 def run(input_file: Path, root: Path, system: str, output_name: str, config: dict,
         *, prompt: str, manifest_key: str = None, max_chars: int = 8000,
         temperature: float = None, metadata_config: str = None,
-        metadata_footer: str = None, single_chunk: bool = False) -> Path:
+        metadata_footer: str = None, single_chunk: bool = False,
+        reduce_prompt: str = None) -> Path:
     output_dir = paths.stage_output_dir(input_file, root, system, output_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / input_file.name
 
     system_prompt = paths.load_prompt(prompt)
-    # Loaded up front so a missing/misconfigured file fails before any LLM calls.
+    # Loaded up front, alongside system_prompt, so a missing/misconfigured
+    # reduce prompt file fails before any LLM calls, not partway through.
+    reduce_system_prompt = paths.load_prompt(reduce_prompt) if reduce_prompt else None
     metadata = metadata_blocks.load(metadata_config) if metadata_config else None
     llm = get_llm_provider(config)
 
@@ -68,11 +83,13 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     total = len(chunks)
 
     # See docs/adr/014-system1d-brief-chunk-overflow-guard.md: a task marked
-    # single_chunk must synthesize its whole input in one LLM call — if it
-    # silently chunked instead, each chunk would produce its own complete,
-    # mutually inconsistent document, concatenated together with no error.
-    # Checked before any LLM call, so a violation costs zero tokens.
-    if single_chunk and total > 1:
+    # single_chunk must synthesize its whole input as one coherent document —
+    # if it silently chunked instead, each chunk would produce its own
+    # complete, mutually inconsistent document, concatenated together with no
+    # error. A task with a reduce_prompt configured can still reconcile a
+    # multi-chunk result into one document below; one without it can't, so
+    # that case still fails loud, before any LLM call, at zero token cost.
+    if single_chunk and total > 1 and not reduce_prompt:
         raise click.ClickException(
             f"{prompt} requires a single call ({len(raw_text)} chars > "
             f"max_chars={max_chars}), but chunking produced {total} chunks. "
@@ -84,6 +101,16 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     for i, chunk in enumerate(chunks, 1):
         click.echo(f"  {output_name} chunk {i}/{total}...")
         parts.append(_strip_code_fence(llm.complete(system_prompt, chunk, temperature=temperature)))
+
+    # Reduce pass (ADR 014, Decision 2): only when chunking actually happened
+    # and this task has a reduce prompt configured. Reconciles the N
+    # independent per-chunk drafts above into one final document — skipped
+    # entirely (no added cost) when there was only ever one chunk.
+    if total > 1 and reduce_prompt:
+        click.echo(f"  {output_name} reduce: reconciling {total} drafts into one...")
+        labeled_drafts = "\n\n".join(_wrap_draft(i, total, part) for i, part in enumerate(parts, 1))
+        reduced = llm.complete(reduce_system_prompt, labeled_drafts, temperature=temperature)
+        parts = [_strip_code_fence(reduced)]
 
     output_text = _normalize_headings("\n\n".join(parts))
     if metadata:
