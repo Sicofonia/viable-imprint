@@ -8,6 +8,7 @@ tasks:
     prompt: prompts/s4/briefing_task.txt
     # Read the whole combined scan in one call, not chunked.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
 
   - name: content-strategy
     engine: llm_text
@@ -15,3 +16,4 @@ tasks:
     # Read the whole briefing in one call, not chunked. See
     # docs/adr/012-system-4-amplification-outbound.md.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md

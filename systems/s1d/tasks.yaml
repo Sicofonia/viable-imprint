@@ -15,6 +15,11 @@ tasks:
     # rather than chunked — synopsis must synthesize the whole book coherently,
     # unlike `brief`, which deliberately treats each manuscript chunk on its own.
     max_chars: 100000
+    # Enforces the assumption above: if the brief ever exceeds max_chars and
+    # actually gets chunked, fail loudly instead of silently concatenating
+    # several partial, mutually inconsistent synopses. See
+    # docs/adr/014-system1d-brief-chunk-overflow-guard.md.
+    single_chunk: true
     # Overrides config.yaml's global llm.temperature (0.0, tuned for fidelity
     # in cleanup/ortho/copyedit). A synopsis is marketing prose, not a
     # transcription — some creativity reads better than the most likely
@@ -31,6 +36,7 @@ tasks:
     prompt: prompts/s1d/story_map_task.txt
     # Same reasoning as synopsis: the brief must be read whole, not chunked.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
     # No temperature override — this is a factual reference document (waypoints,
     # dates, biography), so it inherits config.yaml's fidelity-tuned default
     # rather than synopsis's creative one.
@@ -41,6 +47,7 @@ tasks:
     prompt: prompts/s1d/one_pager_task.txt
     # Same reasoning as synopsis/story-map: read the brief whole, not chunked.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
     # A middle ground: the highlights/summary are sales prose (like synopsis)
     # but the biography and highlights need to stay closely factual (like
     # story-map). Lower than synopsis's 0.7; tune freely.
@@ -52,6 +59,7 @@ tasks:
     prompt: prompts/s1d/press_dossier_task.txt
     # Same reasoning as the other expansion tasks: read the brief whole.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
     # Mix of persuasive copy (tagline, highlights) and factual sections
     # (biography, historical context) — same middle-ground logic as one-pager.
     temperature: 0.4
@@ -68,6 +76,7 @@ tasks:
     prompt: prompts/s1d/trailer_storyboard_task.txt
     # Same reasoning as the other expansion tasks: read the brief whole.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
     # On-screen text needs to be punchy/dramatic, closer to synopsis's register
     # than story-map's factual one, though the scene visuals must stay grounded.
     temperature: 0.6
@@ -78,6 +87,7 @@ tasks:
     prompt: prompts/s1d/goodreads_profile_task.txt
     # Same reasoning as the other expansion tasks: read the brief whole.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
     # Discovery-oriented description + shelves — similar middle ground to
     # one-pager/press-dossier.
     temperature: 0.4
@@ -103,6 +113,7 @@ tasks:
     prompt: prompts/s1d/newsletter_task.txt
     # Never manuscript-length input — read in one call, not chunked.
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
     input: s1d.newsletter-scan
     book_scoped: false
     # Real contact facts appended without ever asking the LLM to guess them —
@@ -125,5 +136,6 @@ tasks:
     engine: llm_text
     prompt: prompts/s1d/article_draft_task.txt
     max_chars: 100000
+    single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
     input: s4.content-strategy
     book_scoped: false
