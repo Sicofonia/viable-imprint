@@ -53,7 +53,7 @@ def _strip_code_fence(text: str) -> str:
 def run(input_file: Path, root: Path, system: str, output_name: str, config: dict,
         *, prompt: str, manifest_key: str = None, max_chars: int = 8000,
         temperature: float = None, metadata_config: str = None,
-        metadata_footer: str = None) -> Path:
+        metadata_footer: str = None, single_chunk: bool = False) -> Path:
     output_dir = paths.stage_output_dir(input_file, root, system, output_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / input_file.name
@@ -66,6 +66,19 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     raw_text = input_file.read_text(encoding="utf-8")
     chunks = chunk_by_paragraphs(raw_text, max_chars=max_chars)
     total = len(chunks)
+
+    # See docs/adr/014-system1d-brief-chunk-overflow-guard.md: a task marked
+    # single_chunk must synthesize its whole input in one LLM call — if it
+    # silently chunked instead, each chunk would produce its own complete,
+    # mutually inconsistent document, concatenated together with no error.
+    # Checked before any LLM call, so a violation costs zero tokens.
+    if single_chunk and total > 1:
+        raise click.ClickException(
+            f"{prompt} requires a single call ({len(raw_text)} chars > "
+            f"max_chars={max_chars}), but chunking produced {total} chunks. "
+            f"This task cannot synthesize a coherent document from partial "
+            f"input — see docs/adr/014-system1d-brief-chunk-overflow-guard.md."
+        )
 
     parts = []
     for i, chunk in enumerate(chunks, 1):
