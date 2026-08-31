@@ -20,6 +20,10 @@ tasks:
     # several partial, mutually inconsistent synopses. See
     # docs/adr/014-system1d-brief-chunk-overflow-guard.md.
     single_chunk: true
+    # If the brief *does* chunk, reconcile the per-chunk drafts into one
+    # final synopsis instead of failing (ADR 014, Decision 2) — the map pass
+    # above still runs per chunk; this is the one extra call that merges them.
+    reduce_prompt: prompts/s1d/synopsis_reduce_task.txt
     # Overrides config.yaml's global llm.temperature (0.0, tuned for fidelity
     # in cleanup/ortho/copyedit). A synopsis is marketing prose, not a
     # transcription — some creativity reads better than the most likely
@@ -37,6 +41,7 @@ tasks:
     # Same reasoning as synopsis: the brief must be read whole, not chunked.
     max_chars: 100000
     single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
+    reduce_prompt: prompts/s1d/story_map_reduce_task.txt   # ADR 014, Decision 2
     # No temperature override — this is a factual reference document (waypoints,
     # dates, biography), so it inherits config.yaml's fidelity-tuned default
     # rather than synopsis's creative one.
@@ -48,6 +53,7 @@ tasks:
     # Same reasoning as synopsis/story-map: read the brief whole, not chunked.
     max_chars: 100000
     single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
+    reduce_prompt: prompts/s1d/one_pager_reduce_task.txt   # ADR 014, Decision 2
     # A middle ground: the highlights/summary are sales prose (like synopsis)
     # but the biography and highlights need to stay closely factual (like
     # story-map). Lower than synopsis's 0.7; tune freely.
@@ -60,6 +66,7 @@ tasks:
     # Same reasoning as the other expansion tasks: read the brief whole.
     max_chars: 100000
     single_chunk: true   # see docs/adr/014-system1d-brief-chunk-overflow-guard.md
+    reduce_prompt: prompts/s1d/press_dossier_reduce_task.txt   # ADR 014, Decision 2
     # Mix of persuasive copy (tagline, highlights) and factual sections
     # (biography, historical context) — same middle-ground logic as one-pager.
     temperature: 0.4

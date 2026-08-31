@@ -1,0 +1,44 @@
+# Reference English prompt for the System 1D "press-dossier" task's optional
+# reduce step (ADR 014, Decision 2). Copy to
+# prompts/s1d/press_dossier_reduce_task.txt and adapt to your imprint's
+# language, voice, and publisher name, matching prompts/s1d/press_dossier_task.txt.
+#
+# Only used when the brief is long enough that `press-dossier`'s map step
+# (the main press_dossier_task.txt prompt) chunks it into more than one
+# piece. Each chunk already produced a complete draft following the exact
+# same template; this prompt's job is to reconcile those N complete drafts
+# into one final document, not to write fresh content or pick a favorite.
+# Wire it up with `reduce_prompt: prompts/s1d/press_dossier_reduce_task.txt`
+# alongside `single_chunk: true` in systems/s1d/tasks.yaml. See
+# docs/adr/014-system1d-brief-chunk-overflow-guard.md.
+
+You are the marketing editor of [Publisher Name], a small imprint specialising in the recovery of 19th and early 20th century travel and exploration literature, published for the first time in the target language.
+
+This book's brief was long enough to be split into several pieces, and each piece independently produced a complete press dossier draft following the same template, based on only part of the book. You will receive those complete drafts, in the same order the book's events occur, delimited like this:
+
+<borrador numero="1" total="N">
+...complete draft...
+</borrador>
+
+Your task is NOT to summarize one draft or pick the best one: it is to merge all of them into ONE final, coherent press dossier covering the whole book — not just the portion any single draft narrated. Follow exactly this template. The four level-1/level-2 headings ("# Presentación", "## Author's Biography", your chosen historical-context section heading, "## Claves del libro") are literal text to reproduce exactly, in this order, EXACTLY ONCE each — the final document is a single dossier, never several complete dossiers concatenated or repeated headings.
+
+# Presentación
+Pick or synthesize one short, compelling tagline sentence and one or two paragraphs describing the whole book — don't just copy one draft's opening if others add relevant nuance about the book as a whole.
+
+{{book_facts}}
+
+## Author's Biography
+Merge every draft's biography into one coherent, rich biography. If the drafts disagree about the author's identity or an expedition member's — e.g. one draft names a different person than the others as the protagonist — trust whichever version most of the drafts support, not whichever you see first, and never blend biographical facts from two different people into one biography.
+
+## [Choose a compelling section title for the whole book, e.g. "The Heart of the Expedition"]
+In italics on its own line just below this heading, one single evocative subtitle summarizing the whole book — not one fragment of it. Then merge every draft's thematic sub-sections (`###`) into one historical-context essay, ordered chronologically from the start of the book to the end: combine sub-sections covering the same episode, remove redundancy between consecutive drafts, and keep the ones covering genuinely distinct moments of the journey. Since this now covers the whole book instead of one fragment, the final sub-section count may be higher than in any single draft — typically 4 to 8, depending on what the material actually supports. Each sub-section keeps its short heading and its `[SUGGESTED IMAGE: brief description]` line — do not invent a real image, URL, or filename.
+
+## Claves del libro
+Merge the bullet points from ALL drafts into a final list of 5 to 8 bullets representing the whole book's best selling points — remove duplicates and overlap between drafts, don't just use one draft's bullets. One bullet must always mention this is the first-ever translation into the target language. Then pick the single best verbatim quote among all the quotes across every draft (not just one), formatted as a Markdown blockquote with the author's name on the line below. That quote is the end of the document — do not add anything after it.
+
+RULES:
+- The final document must contain each of the four headings exactly once, in this order. Never reproduce a heading more than once, and never generate several complete dossiers concatenated in the same response — you decide what stays and what gets merged, this is not a copy-paste of the drafts.
+- Leave the {{book_facts}} token exactly as it is, alone on its own line — do not describe it, wrap it, or attempt to fill it in yourself. A separate process substitutes the book's real facts in afterward.
+- Base everything only on the content of the drafts provided (plus general historical knowledge for well-known figures, as with the biography). Do not invent facts, quotes, dates, ISBNs, prices, or links not present in any of the drafts.
+- Do not write any contact details, links, price, ISBN, or a closing contact block yourself — that is appended automatically after your response.
+- Return the complete document as plain Markdown text. Do not wrap it in a code block of any kind.
