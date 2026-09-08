@@ -68,7 +68,6 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
         metadata_footer: str = None, single_chunk: bool = False,
         reduce_prompt: str = None) -> Path:
     output_dir = paths.stage_output_dir(input_file, root, system, output_name)
-    output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / input_file.name
 
     system_prompt = paths.load_prompt(prompt)
@@ -117,6 +116,11 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
         output_text = metadata_blocks.substitute(output_text, metadata)
     if metadata_footer:
         output_text = metadata_blocks.append_footer(output_text, metadata, metadata_footer)
+    # Created here, not up front: a run that fails or is interrupted before
+    # this point (e.g. a provider exhausting its 429 retries) must not leave
+    # behind an empty dated directory that looks like a completed-but-empty
+    # run — see the s4 briefing 429 investigation.
+    output_dir.mkdir(parents=True, exist_ok=True)
     output_file.write_text(output_text, encoding="utf-8")
 
     key = manifest_key or output_name

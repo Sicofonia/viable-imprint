@@ -64,8 +64,18 @@ def _run_recorded(run_fn, root: Path, system: str, name: str, config: dict):
     start = time.monotonic()
     try:
         result = run_fn()
-    except Exception as e:
-        manifest.record_task(root, key, status="failed", error=str(e), attempted_at=_now_iso(),
+    except BaseException as e:
+        # BaseException, not Exception: a Ctrl+C during a long provider retry
+        # loop is a KeyboardInterrupt, which Exception doesn't catch — left
+        # uncaught, the ledger would keep showing the *previous* successful
+        # run as current, with no trace an attempt was ever made (see
+        # docs/adr — s4 briefing 429 investigation). Recorded as `failed`
+        # like any other incomplete attempt (same retry-eligible handling
+        # throughout orchestrator.py/dashboard.py), just with an error
+        # message that says what actually happened, then re-raised so the
+        # interrupt still propagates normally.
+        error = str(e) or e.__class__.__name__
+        manifest.record_task(root, key, status="failed", error=error, attempted_at=_now_iso(),
                               duration_seconds=round(time.monotonic() - start, 2))
         raise
 
