@@ -36,13 +36,24 @@ llm:
   # llm_text refuses to send a request estimated over this many tokens,
   # naming the task and the numbers instead of burning the retry budget on a
   # request that could never succeed against a hard per-minute ceiling.
-  # 4000 here = half of Groq's reported free-tier ~8,000 tokens-per-minute
-  # for openai/gpt-oss-120b — half, because that ceiling counts input AND
-  # output together, and this pipeline's editorial tasks typically produce
-  # output of roughly input size. Re-derive from your own account's real
-  # limits at console.groq.com/settings/limits (they vary by model and
-  # account). Omit this key entirely to disable the check — the default,
-  # correct choice for a provider/plan with no such ceiling (e.g. Mistral).
+  # Groq's real free-tier TPM for openai/gpt-oss-120b is confirmed at
+  # exactly 8,000 (read directly from a real 413 response body during
+  # implementation testing, not inferred from docs). 4000 here is
+  # deliberately half of that, not the literal ceiling — this check's own
+  # token estimate (~3 chars/token) runs conservative relative to Groq's
+  # real tokenizer: the same real oversized request measured ~34K tokens by
+  # this heuristic but only 21K by Groq's own count, roughly 1.6x over.
+  # Setting this to the full 8,000 risks this *local* check rejecting a
+  # request Groq's real tokenizer would actually have accepted — the
+  # margin exists for that estimation slop, not because TPM charges input
+  # and output against one request's admission (real testing found no
+  # evidence of that: a request's admissibility tracked its own prompt size
+  # against the limit, with completion tokens only added to the account's
+  # rolling usage after the fact). Re-derive from your own account's real
+  # limits at console.groq.com/settings/limits if they differ (they vary by
+  # model and account). Omit this key entirely to disable the check — the
+  # default, correct choice for a provider/plan with no such ceiling (e.g.
+  # Mistral).
   max_request_tokens: 4000
   # Optional — System 3's `s3 dashboard` (ADR 005) uses this to turn captured
   # token counts into a cost figure. Omit this block entirely to skip cost
