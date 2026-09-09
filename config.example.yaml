@@ -1,28 +1,62 @@
-# API keys are loaded from .env (MISTRAL_API_KEY, DEEPL_API_KEY)
+# API keys are loaded from .env (MISTRAL_API_KEY, GROQ_API_KEY, DEEPL_API_KEY)
 # This file contains only non-secret settings and is safe to commit.
 
 llm:
-  provider: mistral
-  # mistral-medium-latest is the default: running an entire book plus every
-  # System 1D/System 4 task through mistral-large-latest burns tokens far
-  # faster than the quality difference justifies for this pipeline's editorial
-  # and marketing tasks. This applies to every task — there's no per-task
-  # model override yet (unlike temperature/max_chars, see tasks.yaml), so
-  # switching back to large means changing this one line.
-  model: mistral-medium-latest
+  # Two providers are supported (see docs/adr/015-groq-llm-provider.md):
+  # "groq" (this project's default) or "mistral". Both speak the same
+  # OpenAI-compatible chat-completions wire format under the hood
+  # (providers/llm/openai_chat.py) — switching between them is this block,
+  # nothing else.
+  provider: groq
+  # There is no provider-agnostic default model name (a Mistral model name
+  # sent to Groq, or vice versa, would just fail) — this key is required
+  # regardless of which provider is selected. openai/gpt-oss-120b for Groq;
+  # mistral-medium-latest for Mistral (mistral-large-latest is available but
+  # burns tokens far faster than the quality difference justifies for this
+  # pipeline's editorial and marketing tasks). Applies to every task — no
+  # per-task model override exists yet (unlike temperature/max_chars, see
+  # tasks.yaml).
+  model: openai/gpt-oss-120b
   # 0.0 = most deterministic / least creative. Recommended for editorial tasks
   # (cleanup, ortho, copyedit) where fidelity to the source text matters more
-  # than fluency. Raise it only if output feels too rigid.
+  # than fluency. Raise it only if output feels too rigid. Note: Groq's own
+  # docs recommend 0.5-0.7 for the GPT-OSS models specifically — left at 0.0
+  # deliberately for now (see the ADR) rather than changed at the same time
+  # as the model, which would make any resulting quality change impossible
+  # to attribute to one cause or the other.
   temperature: 0.0
+  # Groq/GPT-OSS only, ignored by Mistral. "low"/"medium"/"high" — Groq's own
+  # default is "medium". Set to "low" here because this pipeline's tasks are
+  # transformation and structured expansion, not problem-solving, and
+  # reasoning tokens are billed as completion tokens that eat into
+  # max_request_tokens below for little quality benefit. Omit this key to
+  # let Groq's own default apply.
+  reasoning_effort: low
+  # Optional preflight (ADR 015, Decision 3): before any API call,
+  # llm_text refuses to send a request estimated over this many tokens,
+  # naming the task and the numbers instead of burning the retry budget on a
+  # request that could never succeed against a hard per-minute ceiling.
+  # 4000 here = half of Groq's reported free-tier ~8,000 tokens-per-minute
+  # for openai/gpt-oss-120b — half, because that ceiling counts input AND
+  # output together, and this pipeline's editorial tasks typically produce
+  # output of roughly input size. Re-derive from your own account's real
+  # limits at console.groq.com/settings/limits (they vary by model and
+  # account). Omit this key entirely to disable the check — the default,
+  # correct choice for a provider/plan with no such ceiling (e.g. Mistral).
+  max_request_tokens: 4000
   # Optional — System 3's `s3 dashboard` (ADR 005) uses this to turn captured
   # token counts into a cost figure. Omit this block entirely to skip cost
   # calculation; duration and token counts are captured either way. Prices
   # change over time and by account tier — these are illustrative placeholders
-  # only, not verified current figures. Confirm against your own Mistral
-  # account/plan before trusting the dashboard's cost column.
+  # only, not verified current figures. Confirm against your own account/plan
+  # before trusting the dashboard's cost column. Note: while running on a
+  # free tier (e.g. Groq's), this is a *shadow* cost — what the run would
+  # have cost if billed, not what was actually charged — so the dashboard
+  # still shows meaningful exposure to the dependency instead of a
+  # uniformly misleading $0.00. See docs/adr/015-groq-llm-provider.md.
   pricing:
-    prompt_per_million: 0.40
-    completion_per_million: 2.00
+    prompt_per_million: 0.15
+    completion_per_million: 0.60
 
 translation:
   provider: deepl
