@@ -1,6 +1,6 @@
 # ADR 015 — Groq as a Second LLM Provider, and a Shared OpenAI-Wire Base
 
-**Status:** Implemented.
+**Status:** Reverted (2026-09-10). Implemented and validated against real calls (see Implementation notes below), then rolled back after a follow-up (ADR 016) ran into Groq's Developer tier being closed to new signups indefinitely (industry-wide compute demand, no ETA) — the free tier's rate limits weren't workable for this pipeline's larger tasks without it. The pipeline runs on Mistral alone again; this document is kept as a record of what was built and what was learned (the `openai_chat.py` extraction pattern, the two real defects found and fixed, the confirmed real Groq rate-limit numbers), not as an active design.
 
 ---
 
