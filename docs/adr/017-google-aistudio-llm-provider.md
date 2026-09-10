@@ -1,6 +1,6 @@
 # ADR 017 — Google AI Studio (Gemini) as the Default LLM Provider
 
-**Status:** Proposed.
+**Status:** Implemented (with one correction made during implementation — see "The model" and Implementation Notes: this ADR now configures `gemini-3.6-flash`, not the originally-proposed `gemini-3.8-flash`).
 
 ---
 
@@ -8,13 +8,13 @@
 
 This project needs a working default LLM provider. `providers/llm/` currently holds one — Mistral — and its configured account is not usable in practice. An attempt to add Groq (ADR 015, implemented and validated, then reverted; ADR 016, never implemented) foundered not on the integration itself but on Groq's free-tier ceiling of 8,000 tokens per minute, which is smaller than a single request for twelve of this pipeline's tasks, and on Groq's Developer tier being closed to new signups indefinitely. Both of those ADRs are retained, marked `Reverted`, as a record of what was built and learned.
 
-**Google AI Studio** (the Gemini Developer API) is the provider chosen this time, with `gemini-3.8-flash` as the model. The key question — the one that decided the Groq attempt — is whether its free tier can actually carry this pipeline's largest requests. It can, comfortably, and that makes this a far smaller change than ADR 015 turned out to be.
+**Google AI Studio** (the Gemini Developer API) is the provider chosen this time, with `gemini-3.6-flash` as the model (originally `gemini-3.8-flash` — see "The model" below for why real testing changed that). The key question — the one that decided the Groq attempt — is whether its free tier can actually carry this pipeline's largest requests. It can, comfortably, for the configured model, and that makes this a far smaller change than ADR 015 turned out to be.
 
-### The constraint that killed the last attempt does not exist here
+### The constraint that killed the last attempt does not exist here — for the model line, not for every model in it
 
-Secondary sources put the Gemini free tier for the Gemini 3 Flash line at roughly **10 RPM / 250,000 TPM / 1,500 RPD**. Google no longer publishes a rate-limit table (its docs now say to view your active limits in AI Studio), so these figures need confirming against the real account during implementation — but the margin is wide enough that the conclusion holds even if they are somewhat off:
+Secondary sources put the Gemini free tier for the Gemini 3 Flash line at roughly **10 RPM / 250,000 TPM / 1,500 RPD**. Google no longer publishes a rate-limit table (its docs now say to view your active limits in AI Studio), so this needed confirming against the real account during implementation — and confirming it turned out to matter a great deal, not as a formality. See "The model" below and the Implementation Notes: the newest model in the line, `gemini-3.8-flash`, carries a **20 requests-per-day** free-tier ceiling as of this writing — evidently a launch-capacity restriction specific to that model, recently cut down from a prior 250 RPD per real user reports — while the model this ADR actually configures, `gemini-3.6-flash`, real-tested at the RPD this section originally assumed. The token-level argument below is still the right way to think about *why* Gemini is a good fit for this pipeline; it was just checked against the wrong model on the first pass.
 
-| | Groq free tier (ADR 015) | Gemini free tier (this ADR) |
+| | Groq free tier (ADR 015) | Gemini free tier (`gemini-3.6-flash`, this ADR) |
 |---|---|---|
 | Tokens per minute | 8,000 | ~250,000 (~31×) |
 | Largest single request this pipeline makes | ~25,000–33,000 tokens | same |
@@ -23,15 +23,15 @@ Secondary sources put the Gemini free tier for the Gemini 3 Flash line at roughl
 The largest request this pipeline can make is one chunk of an `s1d brief` at the twelve expansion tasks' own `max_chars: 100000` — about 100,000 characters, so roughly 25,000–33,000 tokens depending on the tokenizer. That is a comfortable fraction of a 250,000 TPM budget. Every consequence follows from this one fact:
 
 - **The twelve `single_chunk` tasks work unchanged.** No `max_chars` change, no request-size preflight (ADR 015's Decision 3), no batched or recursive reduce (ADR 016's whole subject). ADR 014's map-reduce machinery and its six `reduce_prompt` files are untouched and keep working exactly as they do today.
-- **No follow-up ADR is implied.** ADR 015 shipped knowing twelve tasks were still broken; this one does not.
-- **The binding limit is requests per minute, not tokens.** At 10 RPM, a chunked System 1B pass over the real book in production (`historia-expedicion-asia-vol3`, 901,457 characters at the `ortho`/`copyedit` stage, 113 chunks) needs at least ~12 minutes of wall time, and 1,500 RPD caps the account at roughly 13 such passes per day. Slow, but workable, and the existing retry/backoff loop already handles the pacing. Worth knowing so a 12-minute run is not mistaken for a hang.
+- **No follow-up ADR is implied** — for `gemini-3.6-flash`. ADR 015 shipped knowing twelve tasks were still broken; this one does not, provided the configured model is one with a usable RPD (Implementation Notes).
+- **The binding limit is requests per minute, not tokens.** At the assumed ~10–15 RPM, a chunked System 1B pass over the real book in production (`historia-expedicion-asia-vol3`, 901,457 characters at the `ortho`/`copyedit` stage, 113 chunks) needs at least ~8–12 minutes of wall time, and a ~1,500 RPD budget caps the account at many such passes per day — not the binding constraint in practice. Slow, but workable, and the existing retry/backoff loop already handles the pacing. Worth knowing so an 8–12-minute run is not mistaken for a hang.
 
 ### The wire format is genuinely different from Mistral's
 
 Mistral speaks OpenAI-style chat completions (`messages`, `choices[0].message.content`). Gemini's `generateContent` does not:
 
 ```
-POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent
 x-goog-api-key: <key>
 
 {
@@ -47,7 +47,9 @@ This is why ADR 015's approach does not transfer. That ADR extracted a shared *O
 
 ### The model
 
-`gemini-3.8-flash` — the newest stable model in the Flash line (`3.8` / `3.7` / `3.6` / `3.5`, alongside a `gemini-3-flash-preview` and a floating `gemini-flash-latest` alias). Pinned deliberately rather than using the floating alias: `manifest.yaml` records `llm_model` per task as permanent provenance for published books, and `gemini-flash-latest` would record something that silently means a different model over time. This is a small correction to the precedent set by the previous `mistral-medium-latest` default, which had the same flaw unnoticed.
+**`gemini-3.6-flash`** — one generation back from the newest stable Flash release (`3.8` / `3.7` / `3.6` / `3.5`, alongside a `gemini-3-flash-preview` and a floating `gemini-flash-latest` alias), at the identical $0.75/$3.75-per-million price as `3.8`/`3.7`. This ADR originally configured `gemini-3.8-flash`; real testing during implementation found its free tier capped at 20 requests per day — evidently a launch-capacity restriction on the newest release, not representative of the line — which is far too little for this pipeline's normal chunked usage (`s1b cleanup` alone uses 2–3 requests for a single short chapter). `gemini-3.6-flash` was real-tested as an immediately-available, separately-quota'd alternative at the same price, and is what this ADR now configures. See the Implementation Notes for the evidence and the mechanism (each model has its own quota bucket, confirmed by one exhausting while the other worked on the first try).
+
+Pinned to a specific stable release deliberately rather than using the floating `gemini-flash-latest` alias: `manifest.yaml` records `llm_model` per task as permanent provenance for published books, and `gemini-flash-latest` would record something that silently means a different model over time — a small correction to the precedent set by the previous `mistral-medium-latest` default, which had the same flaw unnoticed. The same reasoning that motivated pinning is also why this ADR does not chase the newest release reflexively: a newly-launched model can carry restrictions (like `3.8`'s current RPD) that settle down over time, and "newest" is not the same property as "best fit for this pipeline" — worth remembering if `3.8`'s free tier normalizes later and a switch back is considered.
 
 Two model behaviours matter for the implementation:
 
@@ -139,7 +141,7 @@ Because the provider is self-contained (Decision 5) and hidden behind `LLMProvid
 ```yaml
 llm:
   provider: google-aistudio
-  model: gemini-3.8-flash
+  model: gemini-3.6-flash
   temperature: 0.0
   thinking_level: low
   pricing:
@@ -166,6 +168,7 @@ Two details worth stating rather than leaving in the config comments alone:
 - **The `google-genai` Python SDK instead of raw `httpx`.** Rejected for the same reason `mistral.py` never used an SDK: this project's retry and diagnostic layer operates on HTTP status codes, response headers, and `httpx.TransportError`. An SDK wraps all three in its own exception taxonomy, so the hardening would have to be rewritten against that taxonomy for no gain, plus a new dependency. The precedent has held up across two providers now.
 - **A floating `gemini-flash-latest` model alias.** Matches the previous `mistral-medium-latest` precedent and always tracks the newest Flash. Rejected: it records meaningless provenance in `manifest.yaml` for a published book, and a silent model change is a genuine risk to prompt reliability that this project has repeatedly had to hand-tune (ADR 002, 006, 014, and ADR 015's own Groq-specific output defect).
 - **`gemini-3-flash-preview`.** The literal reading of "Gemini 3 Flash" and the cheapest option at $0.50/$3.00. Rejected in favour of a stable release: a preview model can change or be withdrawn without the stability commitment the numbered stable line carries, which is a poor foundation for a pipeline whose prompt reliability is tuned per model.
+- **`gemini-3.8-flash`, the newest stable release** — this ADR's own original choice, superseded during implementation. Real testing found its free tier capped at 20 requests per day (see "The model" and Implementation Notes), evidently a launch-capacity restriction rather than a property of the model line. Worth naming explicitly as a lesson, not just a footnote: "newest stable release" was treated as a reasonable tie-breaker over `3.6`/`3.7` in the original design, and in this case it was the wrong one — a model's free-tier quota can differ sharply from its siblings' right after launch, in a way no amount of reading documentation would have caught without a real call.
 - **Pre-emptively re-adding ADR 015's Groq-era fixes** (the request-size preflight, the bracketed-Roman-numeral output normalizer). Rejected deliberately. The preflight solved a ceiling that does not exist here (see Context), and the normalizer fixed a defect observed in *one specific model's* output; carrying a model-specific workaround forward to a different model on the assumption it will misbehave the same way is exactly backwards. Both remain documented in ADR 015's retained record if Gemini turns out to need something similar — which real testing, not assumption, should decide.
 
 ---
@@ -184,11 +187,12 @@ Two details worth stating rather than leaving in the config comments alone:
 - **Prompt reliability does not transfer with the provider.** Every prompt in `prompts/` is Spanish and was tuned against Mistral over many real-call iterations; `engines/llm_text.py`'s three output normalizers were each added for a specific *Mistral* defect. ADR 015's retained record is direct evidence this matters: Groq's very first real `ortho` call produced a defect (bracket-wrapped Roman numerals) that no existing normalizer caught. Expect a comparable round for Gemini, and check the fidelity-critical Spanish tasks first.
 - **Two copies of the retry/backoff/diagnostics loop** (Decision 5, chosen deliberately) — the next fix to it must be applied to both, or it silently reaches only one.
 - **`RECITATION` and `SAFETY` finish reasons are a live risk, not a formality**, given a corpus of public-domain text likely present in training data and full of period-typical colonial language. Decision 3 makes them legible and actionable — named reason, plain-language meaning, the concrete way out, recorded in `manifest.yaml`, no half-written output — but it cannot make them impossible. If safety blocking is observed, explicit `safetySettings` with `OFF` thresholds is the documented remedy (filtering already defaults to `OFF` on Gemini 3, so that would be belt-and-braces). **There is no equivalent override for `RECITATION`:** if it fires on a task whose whole purpose is faithful transcription, the realistic options are running that task on a different provider or handling the passage by hand — which is exactly why the error message says so outright rather than leaving the operator to infer it. A `RECITATION` block is therefore the one failure mode in this integration that no amount of code can fix, only route around; treating it as a provider-selection signal rather than a bug is the intended response.
-- **10 RPM makes long chunked runs slow** — roughly 12 minutes minimum for a 113-chunk manuscript pass, and about 13 such passes per day against the 1,500 RPD cap. Expected, not a malfunction, but worth knowing before assuming a run has hung.
+- **~10 RPM makes long chunked runs slow** — roughly 8–12 minutes minimum for a 113-chunk manuscript pass. Expected, not a malfunction, but worth knowing before assuming a run has hung.
 - **Thinking cannot be disabled**, so every call spends some output-token budget on it. `thinkingLevel: "low"` minimises but does not remove this, and it inflates `completion_tokens` (correctly — it is billed that way).
 - **`llm.model` becomes required**, a breaking config change for any checkout relying on the old fallback. Intended, and belongs in the README's setup section.
 - **Building on a docs-labelled "Legacy" API surface**, with the migration path and its triggers recorded in Decision 6 rather than left implicit.
-- **The free-tier figures are secondary-sourced.** Google no longer publishes the table; they must be confirmed in AI Studio, and this ADR's arithmetic corrected if they differ materially.
+- **Free-tier quotas are per-model and can vary sharply between siblings in the same line — confirmed the hard way, not a hypothetical.** `gemini-3.8-flash`, this ADR's original choice, tested at a 20-requests-per-day free-tier cap during implementation (a real 429 body: `"Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash"`) — low enough that even `s1b cleanup` alone against the test fixture couldn't complete. `gemini-3.6-flash` (this ADR's configured model) worked immediately against a fresh call while `3.8`'s quota was still exhausted, confirming quotas are tracked independently per model rather than per account. The practical lesson, worth keeping for any future model choice on this provider: **prefer a stable, already-settled model over the newest release, and confirm its real RPD with a live call before committing to it in an ADR** — reading documentation would not have caught this; only a real request did. Also means the "10 RPM / 250K TPM / 1,500 RPD" figures in this document are specific to `gemini-3.6-flash` as tested, not a property of "Gemini 3 Flash" as a category, and should be re-confirmed if the configured model ever changes.
+- **A real, separate friction observed during implementation, worth distinguishing from the RPD finding above:** `gemini-3.8-flash` also returned genuine `503 UNAVAILABLE` ("This model is currently experiencing high demand") on some real calls, correctly retried and eventually recovered. This is ordinary launch-period capacity pressure, unrelated to the per-model RPD issue, and not something to read as a sign this integration is unreliable — the retry loop handled both kinds of friction correctly, which is itself part of what the real testing confirmed.
 
 ---
 
@@ -196,27 +200,60 @@ Two details worth stating rather than leaving in the config comments alone:
 
 **Provider:**
 
-- [ ] Create `providers/llm/google_aistudio.py`: `GoogleAIStudioProvider(LLMProvider)` with the `generateContent` endpoint, `x-goog-api-key` header auth, the Decision 2 payload mapping, the Decision 3 response parsing (no-candidates / non-`STOP` `finishReason` / empty-text, all raising clear errors; multi-part text concatenation skipping `thought` parts), the Decision 4 usage mapping, and its own copy of the retry/backoff loop with a Gemini-specific rate-limit hint and Google's error-body shape — plus the cross-reference comment to `mistral.py`'s copy
-- [ ] Write the per-`finishReason` guidance messages per Decision 3's table, and confirm a blocked response is *not* routed into the retry loop (it arrives as HTTP 200, so this should hold by construction — verify rather than assume)
-- [ ] Add the `google-aistudio` branch to `get_llm_provider()` with a `GOOGLE_AISTUDIO_API_KEY` check mirroring the Mistral one; update the "Unknown LLM provider" message to list both
-- [ ] Remove both `"mistral-medium-latest"` fallbacks (`providers/__init__.py`, `engines/llm_text.py`); raise a clear `ClickException` naming `llm.model` when absent
-- [ ] Confirm `providers/llm/mistral.py` and `providers/llm/base.py` are untouched, and that no engine, `lib/`, or `tasks.yaml` file needed changing
+- [x] Create `providers/llm/google_aistudio.py`: `GoogleAIStudioProvider(LLMProvider)` with the `generateContent` endpoint, `x-goog-api-key` header auth, the Decision 2 payload mapping, the Decision 3 response parsing (no-candidates / non-`STOP` `finishReason` / empty-text, all raising clear errors; multi-part text concatenation skipping `thought` parts), the Decision 4 usage mapping, and its own copy of the retry/backoff loop with a Gemini-specific rate-limit hint and Google's error-body shape — plus the cross-reference comment to `mistral.py`'s copy
+- [x] Write the per-`finishReason` guidance messages per Decision 3's table, and confirm a blocked response is *not* routed into the retry loop (it arrives as HTTP 200, so this should hold by construction — verify rather than assume)
+- [x] Add the `google-aistudio` branch to `get_llm_provider()` with a `GOOGLE_AISTUDIO_API_KEY` check mirroring the Mistral one; update the "Unknown LLM provider" message to list both
+- [x] Remove both `"mistral-medium-latest"` fallbacks (`providers/__init__.py`, `engines/llm_text.py`); raise a clear `ClickException` naming `llm.model` when absent
+- [x] Confirm `providers/llm/mistral.py` and `providers/llm/base.py` are untouched, and that no engine, `lib/`, or `tasks.yaml` file needed changing
 
 **Config and docs:**
 
-- [ ] Add `GOOGLE_AISTUDIO_API_KEY` to `.env.example`
-- [ ] Update `config.yaml` and `config.example.yaml` per Decision 7, including comments on the shadow-cost reasoning and the 1 January 2027 price change
-- [ ] Update the README: setup section (new key, `llm.model` now required), the provider-abstraction paragraph (two providers, two different wire formats, no shared base), and the requirements list
-- [ ] Confirm the account's real rate limits in AI Studio and correct this ADR's figures if they differ from ~10 RPM / 250K TPM / 1,500 RPD
+- [x] Add `GOOGLE_AISTUDIO_API_KEY` to `.env.example`
+- [x] Update `config.yaml` and `config.example.yaml` per Decision 7, including comments on the shadow-cost reasoning and the 1 January 2027 price change
+- [x] Update the README: setup section (new key, `llm.model` now required), the provider-abstraction paragraph (two providers, two different wire formats, no shared base), and the requirements list
+- [x] Confirm the account's real rate limits — done, and materially corrected the model choice as a result; see Implementation Notes
 
 **Validation (real calls, not simulated) — `books/test` only, and never `s1b translate`:**
 
 Scoped exactly as ADR 015's validation was, and for the same reason: `translate` calls DeepL, not the LLM provider, and re-running it spends real DeepL character quota reserved for production books. `books/test/s1b/translated/es/zayagan-chp1.txt` already exists from a prior real translation and is reused as-is.
 
-- [ ] `s1b cleanup` on `books/test/s1b/source/zayagan-chp1.txt` — first real Gemini call. English source, pre-translation, so this checks OCR-cleanup fidelity and whether the three existing normalizers still suffice or new artifacts appear
-- [ ] `s1b ortho` and `s1b copyedit` against the **existing** translated fixture — the two Spanish, fidelity-critical tasks, and where `temperature: 0.0` against a model whose default is higher is most likely to show
-- [ ] One large `single_chunk` task against a real oversized brief (`historia-expedicion-asia-vol3`'s 460,733-character brief, which chunks to 5 pieces) — the case Groq could never run; confirm both the per-chunk map calls and the reduce call succeed, and that no request-size guard is needed
-- [ ] One small non-book task (`s5 evaluate` against an existing candidate brief) — confirms the non-book roots work unchanged
-- [ ] Confirm `s3 dashboard` reports Gemini usage and shadow cost correctly, and specifically that `thoughtsTokenCount` is included in `completion_tokens` (compare a run's reported completion tokens against `usageMetadata` from a raw call, so the addition in Decision 4 is verified rather than assumed)
-- [ ] Verify the blocked-response path without waiting for it to happen naturally: feed the provider a synthetic `generateContent` response body with `finishReason: "RECITATION"` (and one with no candidates plus a `promptFeedback.blockReason`) and confirm each raises immediately, names the reason, and gives the provider-switch guidance — a real `RECITATION` cannot be reliably forced on demand, so this is the one part of the validation that is better checked against a constructed response than a live call
-- [ ] Watch for and record any `finishReason` other than `STOP` during the real calls above — especially `RECITATION` on the faithful-transcription tasks — and document what was seen either way, including "never fired" as a result worth recording
+- [x] `s1b cleanup` on `books/test/s1b/source/zayagan-chp1.txt` — first real Gemini call. English source, pre-translation, so this checks OCR-cleanup fidelity and whether the three existing normalizers still suffice or new artifacts appear
+- [x] `s1b ortho` and `s1b copyedit` against the **existing** translated fixture — the two Spanish, fidelity-critical tasks, and where `temperature: 0.0` against a model whose default is higher is most likely to show
+- [x] One large `single_chunk` task against a real oversized brief (`historia-expedicion-asia-vol3`'s 460,733-character brief, which chunks to 5 pieces) — the case Groq could never run; confirm both the per-chunk map calls and the reduce call succeed, and that no request-size guard is needed
+- [x] One small non-book task (`s5 evaluate` against an existing candidate brief) — confirms the non-book roots work unchanged
+- [x] Confirm `s3 dashboard` reports Gemini usage and shadow cost correctly, and specifically that `thoughtsTokenCount` is included in `completion_tokens` (compare a run's reported completion tokens against `usageMetadata` from a raw call, so the addition in Decision 4 is verified rather than assumed)
+- [x] Verify the blocked-response path without waiting for it to happen naturally: feed the provider a synthetic `generateContent` response body with `finishReason: "RECITATION"` (and one with no candidates plus a `promptFeedback.blockReason`) and confirm each raises immediately, names the reason, and gives the provider-switch guidance — a real `RECITATION` cannot be reliably forced on demand, so this is the one part of the validation that is better checked against a constructed response than a live call
+- [x] Watch for and record any `finishReason` other than `STOP` during the real calls above — especially `RECITATION` on the faithful-transcription tasks — and document what was seen either way, including "never fired" as a result worth recording
+
+---
+
+## Implementation Notes (2026-09-10)
+
+Built and tested end-to-end against real invocations, not simulated. One material correction was made mid-implementation, found by a real call rather than assumed — documented here in full rather than silently folded into a clean final state.
+
+**Synthetic verification, before any real API call.** Per the checklist, the blocked-response path was verified against constructed `generateContent` response bodies (mocked `httpx.post`) before spending anything real: a `finishReason: "RECITATION"` candidate raised immediately, named the reason, and gave the provider-switch guidance; a no-candidates response with `promptFeedback.blockReason` set raised with that reason; an empty-text response despite `finishReason: "STOP"` raised; a multi-part response with a `thought: true` part correctly concatenated only the non-thought parts. Separately confirmed that a genuine `429`/`503` *does* enter the retry loop and recovers correctly (via a scripted two-call sequence: fail once, succeed on retry), and — the specific thing Decision 3 depends on — that a blocked/truncated response makes exactly **one** HTTP call with **zero** retries or sleeps, confirmed by call-counting and mocking `time.sleep`, not just read from the code.
+
+**A real, material correction: `gemini-3.8-flash`'s free tier turned out to be 20 requests per day, not ~1,500.** Discovered on the first real `s1b cleanup` call, which needed 16.7 minutes and absorbed both real `503 UNAVAILABLE` ("This model is currently experiencing high demand") and a real `httpx.ReadTimeout` before succeeding — both correctly retried by the existing loop. Every subsequent real call that day, including a *solo, unhurried* retry with nothing else running, kept failing with the same `429`:
+
+```
+* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash
+```
+
+A web search (not just the account dashboard, which wasn't accessible from this session) turned up a live Google AI Developers Forum thread titled exactly *"Gemini 3.8 Flash Free Tier 20 RPD Is Too Limited for Practical Evaluation"*, confirming this is real, current, and reportedly a recent cut down from a prior 250 RPD — evidently a launch-capacity restriction on the newest model specifically, not a property of the Gemini 3 Flash line. The same search found secondary reports that `gemini-3.6-flash`/`gemini-3.5-flash` share the ~1,500 RPD / 15 RPM figures this ADR originally assumed for "Gemini 3 Flash" generally.
+
+**Confirmed directly, not just from secondary sources, before committing to the fix:** one minimal real call against `gemini-3.6-flash` succeeded immediately while `gemini-3.8-flash`'s quota was still fully exhausted from the same account and the same API key — proving free-tier quotas are tracked **per model**, not per account, and that switching models is a real, immediate fix rather than a hopeful guess. `providers/llm/google_aistudio.py` needed zero code changes for this — the model is a config value, never hardcoded — so the fix was entirely: `config.yaml`/`config.example.yaml`'s `model:` value, this ADR's text, and one example string in `providers/__init__.py`'s error message.
+
+**Also found, and worth separating from the RPD issue above so neither gets misdiagnosed as the other:** running three validation tasks *concurrently* (against `books/test`, the real production book, and `candidates/`, in parallel background processes) caused all three to genuinely starve each other against the shared per-minute request budget, and two of them exhausted their own 600-second retry budgets and failed cleanly — the give-up path worked exactly as designed (clean error, correctly recorded as `failed` in each book's `manifest.yaml`, rate-limit hint appended), it just couldn't win a race this project's pipeline was never designed to run (ADR 001: "dumb and sequential... no orchestration layer"). Concurrent execution during validation was this session's own choice, not a normal usage pattern this integration needs to support — re-run sequentially afterward, cleanly, with zero retries needed on any of them.
+
+**Once `gemini-3.6-flash` was configured, every validation item passed cleanly, quickly, with zero retries:**
+
+- **`s1b cleanup`: clean, 81s.** OCR page-break artifacts correctly removed, foreign term `kang` correctly wrapped in `[i]...[/i]` per the prompt's own rule. No defects.
+- **`s1b ortho`: clean, 43s.** All three orthographic rules correctly applied: guillemets (`«...»`) for quoted text, Roman numerals wrapped in brackets (`CAPÍTULO [I]`, `el siglo [VI]`), foreign terms in `[i]...[/i]` (`kang`, `sarais`, `bodhisattvas`).
+- **A real correction to this project's own prior understanding, surfaced by this exact output:** the bracketed Roman numerals above are **not** a model defect. `prompts/s1b/ortho_task.txt` (this user's own personal prompt) Rule 2 explicitly instructs exactly this: *"Los números romanos deben ir en versalitas, pero prefiero que me los marques entre corchetes"* ("Roman numerals should be in small caps, but I prefer you mark them in brackets"). The reverted ADR 015/Groq work had misdiagnosed this identical, correct output as a defect and shipped a normalizer (`_strip_bracketed_roman_numerals()`) that stripped brackets the user's own prompt explicitly asked for — a real mistake, caught here only because that code no longer exists after the revert, so there was nothing to carry forward incorrectly. No normalizer for this is added in this implementation. Worth remembering if this ever comes up again with a future provider: check the prompt's own rules before diagnosing repeatable "bracket" output as a model quirk.
+- **`s1b copyedit`: clean, 31s.** Per this validation's scoping (run against the raw translated fixture directly, not chained after `ortho`'s output — same as the ADR 015 validation before it), its output correctly has no brackets: Rule 11 preserves brackets already present in its input, and this run's input had none. Not a defect; a consequence of the deliberate validation shortcut, not of real production chaining (where `copyedit` normally receives `ortho`'s bracketed output and Rule 11 would apply for real).
+- **`s1d synopsis` against the real 460,733-character brief: clean, 87s, zero retries.** All 5 map-step chunks and the reduce call succeeded on the first attempt — the exact case Groq's free tier could never handle at all. Output is one coherent two-paragraph synopsis spanning the whole three-year expedition, no `<borrador>` tag leakage, no duplication.
+- **`s5 evaluate`: clean, 9s.** Confirms the non-book (`candidates/`) root path works unchanged.
+- **`s3 dashboard`: confirmed correct**, both per-book and portfolio-wide. `google-aistudio`/`gemini-3.6-flash` rows show real token usage and shadow cost; `completion_tokens` visibly includes thinking tokens (e.g. `cleanup`: 4,306 prompt vs. 7,986 completion — thinking tokens roughly double the naive output-only figure, confirming Decision 4's mapping is both correct and load-bearing, not a rounding nicety); a pre-existing `mistral`/`mistral-medium-latest` row for the same book correctly shows `(stale)`, cascade-invalidated by ADR 009 when `cleanup` was re-run under the new provider — the same mixed-provenance consequence ADR 015 first documented, observed again for real.
+- **No `finishReason` other than `STOP` fired on any real call in this validation pass** — `RECITATION` never triggered, including on the faithful-transcription tasks (`cleanup`, `ortho`, `copyedit`) this ADR flagged as the specific risk. Recorded honestly as "not observed," not "impossible" — Consequences' assessment of `RECITATION` as a live risk stands; this pass simply didn't hit it.
+
+**Not exercised for real in this pass:** `gemini-3.8-flash`'s actual output quality and prompt-reliability behavior were never meaningfully tested, since every real call against it failed before producing usable text. Nothing is known about whether it would have exhibited its own model-specific output quirks (the way Groq did) — moot for now since it isn't the configured model, but worth knowing if `3.8`'s RPD situation changes and a switch back is considered later.

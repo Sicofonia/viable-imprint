@@ -130,7 +130,10 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
         root,
         **{key: str(output_file.relative_to(root))},
         llm_provider=config["llm"]["provider"],
-        llm_model=config["llm"].get("model", "mistral-medium-latest"),
+        # No fallback needed: get_llm_provider() above already raised if
+        # llm.model was unset, so it's guaranteed present here — see
+        # docs/adr/017-google-aistudio-llm-provider.md, Decision 7.
+        llm_model=config["llm"]["model"],
         **source_kwargs,
     )
 
