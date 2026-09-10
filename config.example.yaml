@@ -1,28 +1,51 @@
-# API keys are loaded from .env (MISTRAL_API_KEY, DEEPL_API_KEY)
-# This file contains only non-secret settings and is safe to commit.
+# API keys are loaded from .env (MISTRAL_API_KEY, GOOGLE_AISTUDIO_API_KEY,
+# DEEPL_API_KEY). This file contains only non-secret settings and is safe
+# to commit.
 
 llm:
-  provider: mistral
-  # mistral-medium-latest is the default: running an entire book plus every
-  # System 1D/System 4 task through mistral-large-latest burns tokens far
-  # faster than the quality difference justifies for this pipeline's editorial
-  # and marketing tasks. This applies to every task — there's no per-task
-  # model override yet (unlike temperature/max_chars, see tasks.yaml), so
-  # switching back to large means changing this one line.
-  model: mistral-medium-latest
+  # Two providers are supported (see docs/adr/017-google-aistudio-llm-
+  # provider.md): "google-aistudio" (this project's default) or "mistral".
+  # They speak genuinely different wire formats (Gemini's generateContent
+  # vs. Mistral's OpenAI-style chat completions), unlike the two providers
+  # ADR 015 briefly added and later reverted — each is a fully
+  # self-contained file in providers/llm/, not a shared base.
+  provider: google-aistudio
+  # There is no provider-agnostic default model name (a Mistral model name
+  # sent to Google AI Studio, or vice versa, would just fail) — this key is
+  # required regardless of which provider is selected. gemini-3.6-flash for
+  # Google AI Studio, pinned rather than the floating gemini-flash-latest
+  # alias so manifest.yaml records real, stable provenance for a published
+  # book; mistral-medium-latest for Mistral. Applies to every task — no
+  # per-task model override exists yet (unlike temperature/max_chars, see
+  # tasks.yaml).
+  model: gemini-3.6-flash
   # 0.0 = most deterministic / least creative. Recommended for editorial tasks
   # (cleanup, ortho, copyedit) where fidelity to the source text matters more
-  # than fluency. Raise it only if output feels too rigid.
+  # than fluency. Raise it only if output feels too rigid. Left at 0.0 for
+  # Gemini deliberately, not evaluated against it yet — see the ADR.
   temperature: 0.0
+  # Google AI Studio (Gemini 3) only, ignored by Mistral. "low"/"medium"/
+  # "high" — thinking is on by default for Gemini 3 models and cannot be
+  # disabled entirely; thinking tokens are billed as output tokens. "low"
+  # minimizes that cost for this pipeline's transformation/expansion tasks,
+  # which are not the kind of problem-solving thinking helps with. Omit
+  # this key to let the model's own default ("medium") apply.
+  thinking_level: low
   # Optional — System 3's `s3 dashboard` (ADR 005) uses this to turn captured
   # token counts into a cost figure. Omit this block entirely to skip cost
   # calculation; duration and token counts are captured either way. Prices
   # change over time and by account tier — these are illustrative placeholders
-  # only, not verified current figures. Confirm against your own Mistral
-  # account/plan before trusting the dashboard's cost column.
+  # only, not verified current figures. Confirm against your own account/plan
+  # before trusting the dashboard's cost column. Note: while running on a
+  # free tier (Google AI Studio's, at current volumes), this is a *shadow*
+  # cost — what the run would have cost if billed, not what was actually
+  # charged — so the dashboard still shows meaningful exposure to the
+  # dependency instead of a uniformly misleading $0.00. These figures are
+  # also promotional and double on 1 January 2027 (to $1.50 / $7.50) — a
+  # known, dated change, not a placeholder to eventually verify.
   pricing:
-    prompt_per_million: 0.40
-    completion_per_million: 2.00
+    prompt_per_million: 0.75
+    completion_per_million: 3.75
 
 translation:
   provider: deepl

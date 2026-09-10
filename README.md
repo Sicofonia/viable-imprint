@@ -18,7 +18,7 @@ The pipeline is intentionally **dumb and sequential**. Each command does one thi
 
 ## Open Source
 
-This project is LLM-agnostic and translation-provider-agnostic by design. The provider abstraction (`providers/llm/` and `providers/translation/`) means that swapping Mistral for Anthropic, or DeepL for LibreTranslate, requires adding one file and one line in `config.yaml` — no changes to the pipeline steps themselves. Distribution-platform-agnostic too: `providers/sales/` (ADR 011) auto-detects which platform a sales report came from rather than assuming any one imprint's own (e.g. IngramSpark), so adding a platform this project doesn't ship an adapter for yet is the same one-file shape, no changes to `engines/sales_ingest.py`.
+This project is LLM-agnostic and translation-provider-agnostic by design. The provider abstraction (`providers/llm/` and `providers/translation/`) means that swapping providers requires adding one file and one line in `config.yaml` — no changes to the pipeline steps themselves. **Google AI Studio and Mistral both ship today** (ADR 017): the two speak genuinely different wire formats (Gemini's native `generateContent` vs. Mistral's OpenAI-style chat completions), each a fully self-contained provider file with no shared base — a stronger demonstration of the abstraction than two OpenAI-compatible providers would be. Distribution-platform-agnostic too: `providers/sales/` (ADR 011) auto-detects which platform a sales report came from rather than assuming any one imprint's own (e.g. IngramSpark), so adding a platform this project doesn't ship an adapter for yet is the same one-file shape, no changes to `engines/sales_ingest.py`.
 
 The same principle applies to document generation: the formatting step uses `odfpy` (pure Python, no system dependencies) but the interface is narrow enough to replace with a LibreOffice/uno implementation if you need template-based styling.
 
@@ -30,7 +30,7 @@ Contributions are welcome. If you add a provider, please follow the existing pat
 
 The pipeline is organised in four layers:
 
-**`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods. `providers/sales/` (ADR 011) is shaped a little differently, since it's plural rather than singular — a publisher accumulates royalty reports from however many platforms they actually sell through, so a format is auto-detected per file (`detect(header_row)`) rather than picked once via config. A translation provider can also optionally implement `translate_document()` (currently only `DeepLProvider` does) for a whole-file, no-chunking translation mode — optional and unenforced, same convention as `usage` (ADR 005): a provider that doesn't implement it just doesn't support `s1b translate --document`, checked with `getattr()` at call time, not a required part of the interface.
+**`providers/`** — thin wrappers around external APIs. Each provider implements a two-method interface (`complete` for LLMs, `translate` for translation engines). The rest of the code only ever calls those methods. `providers/llm/` ships `GoogleAIStudioProvider` (default, ADR 017) and `MistralProvider` — two fully self-contained files rather than a shared base, since Gemini's native `generateContent` and Mistral's OpenAI-style chat completions are genuinely different wire formats; each provider owns its own retry/backoff/diagnostics logic, a deliberate tradeoff (ADR 017, Decision 5) rather than sharing code across an incompatible seam. `providers/sales/` (ADR 011) is shaped a little differently, since it's plural rather than singular — a publisher accumulates royalty reports from however many platforms they actually sell through, so a format is auto-detected per file (`detect(header_row)`) rather than picked once via config. A translation provider can also optionally implement `translate_document()` (currently only `DeepLProvider` does) for a whole-file, no-chunking translation mode — optional and unenforced, same convention as `usage` (ADR 005): a provider that doesn't implement it just doesn't support `s1b translate --document`, checked with `getattr()` at call time, not a required part of the interface.
 
 **`lib/`** — shared utilities: paragraph-boundary chunking for long texts, per-book manifest tracking (including the System 2 run-state ledger and its System 3 metrics fields — see below), ODT generation, path resolution, loading/rendering the bibliographic-fact blocks used by `s1d`'s marketing tasks, the System 2 task-graph orchestrator (`lib/orchestrator.py`), the System 3 cost/duration capture (`lib/metrics.py`), the System 3 dashboard aggregation (`lib/dashboard.py`), shared data access for the System 5 homeostat pipeline (`lib/homeostat.py` — finding System 4's latest briefing, reading/writing the decision log), the System 5 policy-drift check (`lib/policy_check.py` — hashing `docs/vsm.md`'s policy subsection against a marker stored in the prompt file), and the System 5 candidate calibration log (`lib/candidates.py`).
 
@@ -201,7 +201,7 @@ Run it with `pipeline.py s2 newsletter run`; the final copy under `newsletter-tr
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) — manages Python version and dependencies automatically
-- A Mistral API key (the pipeline calls the Mistral API directly over HTTP — no SDK required)
+- An API key for the LLM provider you configure — Google AI Studio (default) or Mistral (the pipeline calls both directly over HTTP — no SDK required for either, see ADR 017)
 - A DeepL API key
 
 **Python version:** the project is pinned to Python 3.12 via `.python-version`. Do not run it with Python 3.13 or 3.14 — some dependencies do not install correctly on those versions yet. `uv` handles this for you automatically.
@@ -239,14 +239,17 @@ cp config.example.yaml config.yaml
 cp .env.example .env
 ```
 
-Open `.env` and add your API keys:
+Open `.env` and add the API key for whichever LLM provider you selected in `config.yaml` (`llm.provider: google-aistudio` or `mistral`), plus DeepL's:
 
 ```
+GOOGLE_AISTUDIO_API_KEY=your-google-aistudio-key-here
 MISTRAL_API_KEY=your-mistral-key-here
 DEEPL_API_KEY=your-deepl-key-here
 ```
 
-Keys must be unquoted and have no trailing spaces. DeepL free-plan keys end in `:fx` — paste them as-is and the client routes to the correct endpoint automatically.
+You only strictly need the key matching your configured `llm.provider` — the other LLM key can stay a placeholder. Keys must be unquoted and have no trailing spaces. DeepL free-plan keys end in `:fx` — paste them as-is and the client routes to the correct endpoint automatically.
+
+`llm.model` is required regardless of provider — there's no cross-provider default, since a Mistral model name sent to Google AI Studio (or vice versa) would just fail. See `config.example.yaml`'s comments for both providers' settings, including the Google-specific `thinking_level` key that Mistral ignores. See `docs/adr/017-google-aistudio-llm-provider.md` for the full reasoning, including a real failure mode worth knowing about before you rely on it: Gemini can refuse to complete a task with `finishReason: RECITATION` when its output too closely reproduces training data — a live risk for this project specifically, since its whole job is faithfully reproducing public-domain text. The error names the reason and the way out (a different provider, or handling the passage by hand) rather than leaving you to guess.
 
 Optionally, fill in the `pricing:` blocks under `llm:`/`translation:` in `config.yaml` with your actual per-provider rates to enable `s3 dashboard`'s cost column (System 3, ADR 005) — leave them out and it still works, just without a dollar figure. Optionally also add an `s3.deviation` block (`cost_multiplier`/`duration_multiplier`) to enable portfolio outlier flags in `s3 dashboard` (ADR 010) — same story, leave it out and the dashboard just doesn't flag anything.
 
