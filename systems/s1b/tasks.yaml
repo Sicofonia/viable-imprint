@@ -4,6 +4,14 @@ tasks:
     prompt: prompts/s1b/cleanup_task.txt
     output: cleaned
     manifest_key: cleaned
+    # Raised from engines/llm_text.py's leftover max_chars: int = 8000
+    # default (a Mistral-era value never revisited for Google AI Studio) to
+    # the same 100000 already proven safe for every other llm_text task
+    # since ADR 014 — cuts this manuscript-walking task's chunk (and so
+    # request) count roughly 10x, which matters directly against Google AI
+    # Studio's real, flat 20-requests/day free tier. See
+    # docs/adr/017-google-aistudio-llm-provider.md's 2026-09-11 correction.
+    max_chars: 100000
 
   - name: translate
     engine: translation
@@ -12,10 +20,14 @@ tasks:
   - name: ortho
     engine: llm_text
     prompt: prompts/s1b/ortho_task.txt
+    # Same reasoning as cleanup above.
+    max_chars: 100000
 
   - name: copyedit
     engine: llm_text
     prompt: prompts/s1b/copyedit_task.txt
+    # Same reasoning as cleanup above.
+    max_chars: 100000
 
   - name: format
     engine: odt_format
