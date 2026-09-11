@@ -1,6 +1,6 @@
 # ADR 018 — Provider-Aware Chunk Sizing for `llm_text`
 
-**Status:** Proposed — design only, no code changes in this PR. Implementation to follow as a separate pass once this design is confirmed, mirroring this project's own two-step precedent (a design-doc PR first, reviewed, then a separate implementation PR — used consistently since ADR 006; see also ADR 015→016's sequencing).
+**Status:** Implemented (2026-09-11). Built per this document's own Decision points, with one honestly-flagged gap — see Implementation Notes: the computed default (229,376 characters against the real configured model) was validated for correct wiring against a small real call, but not stress-tested at its own actual size the way ADR 017's 2026-09-11 correction stress-tested `100000`, since doing so would cost meaningfully more of the scarce daily request budget for a value with real margin already reasoned through below.
 
 ---
 
@@ -124,13 +124,29 @@ Today, `providers/llm/google_aistudio.py`'s retry loop is purely reactive — it
 
 ## Implementation Checklist
 
-*(First draft, describing the scope of a later, separate implementation PR — nothing here ships with this design-only ADR.)*
+- [x] Add `llm.limits.max_output_tokens` to `config.yaml` and `config.example.yaml`, with a config comment on re-confirming the value against Google's current model documentation before trusting it (same caution already applied to `pricing`) — `65536`, confirmed against Google DeepMind's own model card (2026-09-11), not a secondary source
+- [x] Add `_CHARS_PER_TOKEN_ESTIMATE` and a `_resolve_default_max_chars(config)` helper to `engines/llm_text.py`; change `run()`'s `max_chars` parameter default from `8000` to `None`
+- [x] Grep-verify the zero-regression invariant (Decision 5): every `single_chunk: true` task, and `cleanup`/`ortho`/`copyedit`, already set `max_chars` explicitly — confirmed, 12 `single_chunk: true` entries and 15 `max_chars` entries (12 + the 3 from `s1b`) line up 1:1
+- [x] Echo the resolved `max_chars` value in `llm_text.run()`'s per-chunk progress output
+- [x] One real-call validation against Google AI Studio — see Implementation Notes for why this validated correct wiring, not the computed value's size safety, and why that gap is acceptable for now
+- [x] Confirm a Mistral-configured run is unaffected (legacy `8000` literal preserved via the fallback branch) — confirmed directly against `_resolve_default_max_chars()` with a Mistral-shaped config lacking `llm.limits`
+- [x] Update the README's `llm_text` engine description, scoped explicitly to what's Google-AI-Studio-specific vs. provider-general
+- [x] Explicitly not built in this pass: proactive RPM pacing (Decision 6), RPD budget visibility, `engines/translation.py` changes (Decision 7)
 
-- [ ] Add `llm.limits.max_output_tokens` to `config.yaml` and `config.example.yaml`, with a config comment on re-confirming the value against Google's current model documentation before trusting it (same caution already applied to `pricing`)
-- [ ] Add `_CHARS_PER_TOKEN_ESTIMATE` and a `_resolve_default_max_chars(config)` helper to `engines/llm_text.py`; change `run()`'s `max_chars` parameter default from `8000` to `None`
-- [ ] Grep-verify the zero-regression invariant (Decision 5): every `single_chunk: true` task, and `cleanup`/`ortho`/`copyedit`, already set `max_chars` explicitly
-- [ ] Echo the resolved `max_chars` value in `llm_text.run()`'s per-chunk progress output
-- [ ] One real-call validation against Google AI Studio, using a task with no explicit `max_chars` override, confirming the resolved default is sane and doesn't immediately trip `finishReason=MAX_TOKENS`
-- [ ] Confirm a Mistral-configured run is unaffected (legacy `8000` literal preserved via the fallback branch)
-- [ ] Update the README's `llm_text` engine description, scoped explicitly to what's Google-AI-Studio-specific vs. provider-general
-- [ ] Explicitly not built in that pass: proactive RPM pacing (Decision 6), RPD budget visibility, `engines/translation.py` changes (Decision 7)
+---
+
+## Implementation Notes (2026-09-11)
+
+Built directly against this document's own Decision points, on a fresh branch off `main` after PR #36 (ADR 017's correction) had already merged.
+
+**`max_output_tokens: 65536` was sourced, not assumed.** A web search first suggested this figure via secondary sources (blog posts), which this project has been burned by trusting once already (ADR 017's original RPD figure). Cross-checked against Google DeepMind's own model card for `gemini-3.6-flash` (`deepmind.google/models/model-cards/gemini-3-6-flash/`), which states the same number directly: "64K token output." Used as the config value with that provenance recorded in a comment, per Decision 1's own caution.
+
+**The computed default resolves to 229,376 characters** against the real, currently configured model (`65536 × 3.5`) — over twice `100000`, the value ADR 017's correction validated directly. Worth being honest about what was and was not re-proven here:
+
+- **Wiring correctness was validated with a real call.** `_resolve_default_max_chars()` was exercised end-to-end — real config, real provider, real API call — against the same small test fixture ADR 017's own validation used (`books/test/s1b/source/zayagan-chp1.txt`, 15,101 characters), run in a throwaway scratch book and cleaned up after. The new progress line correctly printed `max_chars=229376 (1 chunk)`, the call completed cleanly, and the output was well-formed. This confirms the mechanism reads config, computes the right value, and reaches the provider correctly.
+- **Size safety at 229,376 characters specifically was not re-proven with a large real call**, unlike `100000`'s validation in ADR 017's correction. The small fixture is well under the computed ceiling, so it never actually produced a chunk anywhere near that size. Deliberately not spending a second large chunk's worth of the day's 20-request budget to re-prove a number this document can already reason about with real data: ADR 017's own validation of the real production manuscript at `100000` characters recorded `completion_tokens: 22660` for an output of `97,446` characters — a real, observed output efficiency of ~4.30 characters per token, noticeably better than this document's conservative `3.5` estimate. Scaling that real ratio to `229,376` characters of comparably-shaped 1:1 output predicts roughly `53,300` output tokens — about 81% of the `65,536` ceiling, leaving real (if not huge) margin. This is reasoning from real data, not a fresh guess, but it is extrapolation, not a direct measurement at this size — named honestly rather than presented as equivalent to the `100000` validation.
+- **If this margin ever turns out to be too thin in real production use** (a `finishReason=MAX_TOKENS` on a task relying on the computed default), the fix is a config change, not a code change: lower `chars_per_token`'s effective conservatism by editing `_CHARS_PER_TOKEN_ESTIMATE`, or set an explicit, smaller `max_chars` directly on the affected task in its `tasks.yaml` entry, which — per Decision 3 — always wins outright over the computed default anyway.
+
+**Confirmed, not just designed:** a Mistral-shaped config dict with no `llm.limits` block resolves to exactly `8000`, the pre-ADR-018 default, via `_resolve_default_max_chars()`'s fallback branch — checked directly, not just read from the code.
+
+**The timeout finding from ADR 017's correction (Consequences, "Harder / needs care") remains open, as anticipated.** This ADR's mechanism only derives `max_chars` from `max_output_tokens`; it has no awareness of `providers/llm/google_aistudio.py`'s fixed `timeout=120.0`, which does not scale with request size. A large computed default (like `229,376` here) inherits the same latency/retry-budget risk ADR 017's validation surfaced at `100000` characters, unaddressed by this ADR by design (see that Consequences bullet for the reasoning) — still worth picking up as its own small, separate change if it recurs in real production use, not silently forgotten.
