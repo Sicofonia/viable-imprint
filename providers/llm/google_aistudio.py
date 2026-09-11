@@ -31,29 +31,37 @@ _INITIAL_BACKOFF_SECONDS = 2
 _MAX_BACKOFF_SECONDS = 60  # cap per-wait so no single stretch is absurdly long
 
 # Google no longer publishes a rate-limit table (its docs point at each
-# account's own AI Studio dashboard instead), and — confirmed the hard way
-# during implementation, see docs/adr/017-google-aistudio-llm-provider.md's
-# Implementation Notes — free-tier quotas are tracked PER MODEL and can
-# differ sharply between siblings in the same line: gemini-3.8-flash was
-# found capped at 20 requests/day (a launch-capacity restriction) while
-# gemini-3.6-flash (this project's configured default) tested at roughly
-# the 10 RPM / 250,000 TPM / 1,500 RPD this hint describes. TPM is not the
-# binding limit for this pipeline either way (every request this project
-# makes is a small fraction of 250K tokens); RPM/RPD is — so a 429 here is
-# expected to fire routinely on a long chunked run, not a sign of trouble,
-# UNLESS it persists for many minutes even on a single, unhurried request,
-# which is the signature of a much lower per-model RPD than expected (see
-# the ADR) rather than ordinary throttling.
+# account's own AI Studio dashboard instead). Free-tier quotas ARE tracked
+# PER MODEL — confirmed the hard way during implementation, see ADR 017's
+# original Implementation Notes (2026-09-10) — but the assumed MAGNITUDE
+# for every model other than gemini-3.8-flash was wrong, corrected via
+# further real account testing on 2026-09-11 (see ADR 017's Context
+# "Correction (2026-09-11)" and its second, 2026-09-11-dated Implementation
+# Notes section): every model in the line — 3.8, 3.7, 3.6, 3.5 — shares the
+# SAME flat free-tier ceiling, roughly 5 requests/minute, 20 requests/day
+# (peak), 250,000 input tokens/minute (peak). The per-model BUCKET
+# mechanism is real (a 3.8 429 does not affect 3.6's own quota, confirmed
+# directly); what was wrong was believing 3.6/3.7/3.5 had a much larger
+# ~1,500 RPD bucket than 3.8's 20 — they do not. At 20 RPD flat, request
+# COUNT is the binding constraint for this pipeline, not tokens — a 429
+# here is expected to recur, routinely, well before any TPM/RPM ceiling is
+# ever approached, on anything beyond a small single-task run.
 _RATE_LIMIT_HINT = (
-    " Google AI Studio's free tier for this model is reported at roughly "
-    "10 requests/minute, 250,000 tokens/minute, and 1,500 requests/day — "
-    "confirm your account's real limits at aistudio.google.com/rate-limit. "
-    "A 429 here is RESOURCE_EXHAUSTED; on a long chunked run this is "
-    "expected to fire routinely at 10 RPM, not a sign of a problem. If it "
-    "persists for many minutes on a single request with nothing else "
-    "running, the model's daily quota may be far lower than the line's "
-    "usual figure (gemini-3.8-flash was found at 20 requests/day, not "
-    "~1,500) — try a different Flash release rather than waiting it out."
+    " Google AI Studio's real, confirmed free tier for this model line is "
+    "roughly 5 requests/minute, 20 requests/day, and 250,000 input tokens/"
+    "minute (all peak figures) — confirm your account's current limits at "
+    "aistudio.google.com/rate-limit. A 429 here is RESOURCE_EXHAUSTED; at "
+    "only 20 requests/day, this is expected to fire routinely on anything "
+    "beyond a small single-task run, not a sign of a problem. Each model "
+    "in this line (3.8/3.7/3.6/3.5) is tracked in its own separate quota "
+    "bucket, but at this SAME flat 20 RPD ceiling — switching to a "
+    "different Flash release will NOT help, since it shares the same "
+    "daily cap, not a larger one. If it persists for many minutes on a "
+    "single, unhurried request with nothing else running, the day's "
+    "20-request budget for this model is most likely already exhausted — "
+    "wait for the daily reset rather than retrying, or reduce this task's "
+    "request count for future runs (see docs/adr/017-google-aistudio-llm-"
+    "provider.md)."
 )
 
 # Decision 3's per-finishReason guidance (ADR 017): a blocked or truncated
