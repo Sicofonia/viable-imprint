@@ -10,4 +10,5 @@ dependencies = [
     "deepl>=1.18",
     "odfpy>=1.4",
     "feedparser>=6.0.12",
+    "pikepdf>=10.13.0.post1",
 ]
