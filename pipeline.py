@@ -13,6 +13,7 @@ Usage examples:
   python pipeline.py s1b ortho books/life-as-explorer/s1b/translated/es/my-life.txt
   python pipeline.py s1b copyedit books/life-as-explorer/s1b/ortho/es/my-life.txt
   python pipeline.py s1b format books/life-as-explorer/s1b/copyedit/es/my-life.txt
+  python pipeline.py s1c check exported_cover.pdf --trim-w 152 --trim-h 229
   python pipeline.py s1d brief books/life-as-explorer/s1b/copyedit/es/my-life.txt
   python pipeline.py s2 status life-as-explorer
   python pipeline.py s2 run life-as-explorer
@@ -25,11 +26,13 @@ import re
 import sys
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import click
 import yaml
 from dotenv import load_dotenv
 
+import pdf_bleed_tool
 from lib import candidates, dashboard, homeostat, manifest, orchestrator, paths, policy_check
 from lib import task_loader
 from lib.task_loader import build_system_group
@@ -184,6 +187,70 @@ def s5_check_policy_sync(do_update):
 
 
 cli.add_command(_s5_group)
+
+
+# ---------------------------------------------------------------------------
+# System 1C — Design and Graphic Production. Unlike s1b/s1d/s4/s5, this group
+# is hand-written and wraps pdf_bleed_tool.py, a pure non-LLM PDF
+# post-processing utility with no engine/task shape. Run by hand after a
+# human has reviewed and exported the PDF from the formatted .odt (the
+# "1B -> 1C handoff") — deliberately outside System 2 orchestration, since
+# that export is itself a manual, human-gated step with no tracked input.
+# Writes no ledger/manifest.yaml entries. See
+# docs/adr/019-system1c-pdf-print-prep-tooling.md.
+# ---------------------------------------------------------------------------
+
+@click.group(name="s1c", help="System 1C — Design and Graphic Production (print file prep)")
+def s1c():
+    pass
+
+
+@s1c.command(name="check")
+@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--trim-w", type=float, default=None, help="Expected trim width")
+@click.option("--trim-h", type=float, default=None, help="Expected trim height")
+@click.option("--tolerance", type=float, default=0.4, show_default=True,
+              help="Tolerance (a common vendor requirement)")
+@click.option("--unit", type=click.Choice(["mm", "pt"]), default="mm", show_default=True)
+def s1c_check(input_file, trim_w, trim_h, tolerance, unit):
+    """Inspect a PDF's page boxes (MediaBox/TrimBox/BleedBox) in mm."""
+    pdf_bleed_tool.cmd_check(SimpleNamespace(
+        input=input_file, trim_w=trim_w, trim_h=trim_h, tolerance=tolerance, unit=unit,
+    ))
+
+
+@s1c.command(name="set-interior")
+@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.argument("output_file", type=click.Path(dir_okay=False))
+@click.option("--trim-w", type=float, required=True)
+@click.option("--trim-h", type=float, required=True)
+@click.option("--tolerance", type=float, default=0.4, show_default=True)
+@click.option("--unit", type=click.Choice(["mm", "pt"]), default="mm", show_default=True)
+def s1c_set_interior(input_file, output_file, trim_w, trim_h, tolerance, unit):
+    """Set an explicit TrimBox on every page of the interior PDF (no bleed)."""
+    pdf_bleed_tool.cmd_set_interior(SimpleNamespace(
+        input=input_file, output=output_file, trim_w=trim_w, trim_h=trim_h,
+        tolerance=tolerance, unit=unit,
+    ))
+
+
+@s1c.command(name="set-cover")
+@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.argument("output_file", type=click.Path(dir_okay=False))
+@click.option("--trim-w", type=float, required=True, help="Front+back cover width (WITHOUT spine)")
+@click.option("--trim-h", type=float, required=True, help="Cover height")
+@click.option("--spine-w", type=float, default=0.0, show_default=True, help="Spine width, added to trim-w")
+@click.option("--bleed", type=float, default=3.0, show_default=True, help="Bleed per side")
+@click.option("--unit", type=click.Choice(["mm", "pt"]), default="mm", show_default=True)
+def s1c_set_cover(input_file, output_file, trim_w, trim_h, spine_w, bleed, unit):
+    """Set TrimBox and BleedBox on the cover PDF (always needs bleed)."""
+    pdf_bleed_tool.cmd_set_cover(SimpleNamespace(
+        input=input_file, output=output_file, trim_w=trim_w, trim_h=trim_h,
+        spine_w=spine_w, bleed=bleed, unit=unit,
+    ))
+
+
+cli.add_command(s1c)
 
 
 # ---------------------------------------------------------------------------
