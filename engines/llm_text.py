@@ -36,6 +36,33 @@ _CODE_FENCE_RE = re.compile(r"^```[^\n]*\n(.*)\n```$", re.DOTALL)
 # artifact is being fixed here.
 _BRACKETED_HEADING_RE = re.compile(r"^(#{1,6}) \[(.+)\]$", re.MULTILINE)
 
+# ADR 018: converts a token-based output ceiling (config-declared, since it
+# drifts by model — see config.example.yaml's llm.limits) into a
+# character-based max_chars, which is what chunk_by_paragraphs() actually
+# operates on. A conservative fixed estimate, not calibrated from real
+# completion_tokens history: that figure conflates real output text with
+# Gemini's thinking tokens (ADR 017 Decision 4), so it is not a trustworthy
+# proxy for actual output *length*.
+_CHARS_PER_TOKEN_ESTIMATE = 3.5
+
+# The exact default this engine used before ADR 017/018 — preserved as the
+# fallback for any provider that does not declare llm.limits.max_output_tokens
+# (Mistral, untouched by ADR 018; see that ADR's Consequences).
+_LEGACY_DEFAULT_MAX_CHARS = 8000
+
+
+def _resolve_default_max_chars(config: dict) -> int:
+    """Provider-aware fallback max_chars, used only when a task's own
+    tasks.yaml entry has no max_chars key at all — an explicit task-level
+    value always wins by construction (run() never calls this when max_chars
+    was passed in). See docs/adr/018-provider-aware-chunk-sizing.md,
+    Decision 3.
+    """
+    max_output_tokens = config.get("llm", {}).get("limits", {}).get("max_output_tokens")
+    if max_output_tokens is None:
+        return _LEGACY_DEFAULT_MAX_CHARS
+    return int(max_output_tokens * _CHARS_PER_TOKEN_ESTIMATE)
+
 
 def _normalize_headings(text: str) -> str:
     while _DOUBLED_HEADING_RE.search(text):
@@ -63,7 +90,7 @@ def _wrap_draft(index: int, total: int, text: str) -> str:
 
 
 def run(input_file: Path, root: Path, system: str, output_name: str, config: dict,
-        *, prompt: str, manifest_key: str = None, max_chars: int = 8000,
+        *, prompt: str, manifest_key: str = None, max_chars: int = None,
         temperature: float = None, metadata_config: str = None,
         metadata_footer: str = None, single_chunk: bool = False,
         reduce_prompt: str = None) -> Path:
@@ -77,9 +104,15 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     metadata = metadata_blocks.load(metadata_config) if metadata_config else None
     llm = get_llm_provider(config)
 
+    # ADR 018: a task's own tasks.yaml max_chars always wins outright when
+    # set; an unset task falls back to a provider-aware computed default,
+    # never the reverse — see _resolve_default_max_chars().
+    effective_max_chars = max_chars if max_chars is not None else _resolve_default_max_chars(config)
+
     raw_text = input_file.read_text(encoding="utf-8")
-    chunks = chunk_by_paragraphs(raw_text, max_chars=max_chars)
+    chunks = chunk_by_paragraphs(raw_text, max_chars=effective_max_chars)
     total = len(chunks)
+    click.echo(f"  {output_name}: max_chars={effective_max_chars} ({total} chunk{'s' if total != 1 else ''})")
 
     # See docs/adr/014-system1d-brief-chunk-overflow-guard.md: a task marked
     # single_chunk must synthesize its whole input as one coherent document —
@@ -91,7 +124,7 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     if single_chunk and total > 1 and not reduce_prompt:
         raise click.ClickException(
             f"{prompt} requires a single call ({len(raw_text)} chars > "
-            f"max_chars={max_chars}), but chunking produced {total} chunks. "
+            f"max_chars={effective_max_chars}), but chunking produced {total} chunks. "
             f"This task cannot synthesize a coherent document from partial "
             f"input — see docs/adr/014-system1d-brief-chunk-overflow-guard.md."
         )

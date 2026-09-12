@@ -46,6 +46,20 @@ llm:
   pricing:
     prompt_per_million: 0.75
     completion_per_million: 3.75
+  # Optional — docs/adr/018-provider-aware-chunk-sizing.md. Used to derive a
+  # safe default max_chars for any llm_text task that does not set its own
+  # in tasks.yaml (an explicit task-level max_chars always wins outright —
+  # this only ever fills in for a task that specified nothing). Omit this
+  # block to fall back to the pre-ADR-018 default (8000 chars) — same
+  # opt-in shape as pricing above, and the same caution applies: this is a
+  # property of the currently configured model, not the account, and goes
+  # stale on a model swap. 65536 is gemini-3.6-flash's real output-token
+  # ceiling, confirmed 2026-09-11 against Google DeepMind's own model card
+  # (ai.google.dev / deepmind.google), not assumed from a blog post — see
+  # the ADR's Decision 1 for why this lives in config rather than a
+  # hardcoded constant.
+  limits:
+    max_output_tokens: 65536
 
 translation:
   provider: deepl
