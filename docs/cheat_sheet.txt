@@ -50,6 +50,29 @@ SYSTEM 1 — OPERATIONS (does the actual editorial work)
                                               --trim-w = front+back WITHOUT spine
                                               (spine width is added for you; get it
                                               from the vendor's calculator)
+  --trim-w = page WIDTH, --trim-h = page HEIGHT (two separate numbers, mm).
+  Interior: use your .odt page size (Format > Page Style in LibreOffice).
+  Cover: a separate, wider PDF (see below); it does NOT match the .odt.
+
+  EXAMPLES — book trim 152 x 229 mm, spine 12 mm (from vendor calculator), bleed 3 mm
+  (run from the repo root; the PDFs can be anywhere — give the path)
+
+  1. Interior PDF (page size = trim size, 152 x 229):
+       uv run python pipeline.py s1c check interior.pdf --trim-w 152 --trim-h 229
+       uv run python pipeline.py s1c set-interior interior.pdf interior_print.pdf --trim-w 152 --trim-h 229
+       uv run python pipeline.py s1c check interior_print.pdf --trim-w 152 --trim-h 229
+     First check: TrimBox says "inherited from MediaBox — not defined in the PDF".
+     After set-interior: TrimBox says "(explicit)". A warning means the PDF's
+     page size differs from 152 x 229 by more than 0.4 mm.
+
+  2. Cover PDF (front + back, no spine = 304 wide; height 229):
+       uv run python pipeline.py s1c set-cover cover.pdf cover_print.pdf --trim-w 304 --trim-h 229 --spine-w 12 --bleed 3
+     Expected cover PDF page size: (304 + 12 + 2*3) x (229 + 2*3) = 322 x 235 mm.
+     Result: centered TrimBox of 316 x 229 plus a full-page BleedBox.
+
+  3. Just look at any PDF's boxes:
+       uv run python pipeline.py s1c check cover_print.pdf
+
   Also runnable standalone: python pdf_bleed_tool.py check|set-interior|set-cover ...
   (ADR 019)
 
