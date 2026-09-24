@@ -1,0 +1,100 @@
+VIABLE IMPRINT — COMMAND CHEAT SHEET
+Every command is prefixed with: uv run python pipeline.py
+(<slug> = book folder name under books/, e.g. life-as-explorer)
+
+------------------------------------------------------------
+GENERAL / SETUP
+------------------------------------------------------------
+init <slug>                          create a new book project
+book set-isbn <slug> <isbn>          record ISBN (needed before sales-ingest)
+candidate new <slug>                 create a candidate brief folder
+
+------------------------------------------------------------
+SYSTEM 1 — OPERATIONS (does the actual editorial work)
+------------------------------------------------------------
+1B — Editorial Production (sequential, each reads the previous output)
+  s1b cleanup <source.txt>                    OCR text -> cleaned text
+  s1b translate <cleaned.txt> [-d/--document] EN -> ES (chunked, or whole-doc with -d)
+  s1b ortho <translated.txt>                  orthotypographic pass
+  s1b copyedit <ortho.txt>                    copyedit pass
+  s1b format <copyedited.txt> [--template <file.odt>]   -> formatted .odt
+
+1D — Publication & Marketing (brief first, rest all read the brief, any order)
+  s1d brief <copyedited.txt>                  manuscript -> extraction brief
+  s1d synopsis <brief.txt>
+  s1d story-map <brief.txt>
+  s1d one-pager <brief.txt>
+  s1d press-dossier <brief.txt>                (needs templates/marketing_metadata.yaml)
+  s1d trailer-storyboard <brief.txt>
+  s1d goodreads-profile <brief.txt>
+  s1d metadata <brief.txt>                     (needs templates/marketing_metadata.yaml, no LLM)
+  s1d article-draft <content-strategy brief>   turns an S4 content-strategy brief into an article
+
+  Newsletter (periodic — normally run via "s2 newsletter run", not by hand):
+  s1d newsletter-scan / s1d newsletter / s1d newsletter-track
+
+1C — Design & Graphic Production (print-file prep — MANUAL, by hand)
+  Not a manifest task: no LLM, no engine, nothing written to the S2 ledger, not
+  run by "s2 run". Workflow: s1b format -> .odt -> review/finalize layout and
+  export the PDF from LibreOffice by hand -> s1c (below) -> upload to the
+  print platform by hand. LibreOffice only writes /MediaBox; print vendors
+  (Bibliomanager, IngramSpark) want explicit /TrimBox and /BleedBox.
+  Sizes are mm by default (--unit pt to switch); example trim 152 x 229.
+  s1c check <pdf> [--trim-w N --trim-h N] [--tolerance 0.4]
+                                              inspect MediaBox/TrimBox/BleedBox,
+                                              optionally compare to expected trim
+  s1c set-interior <in.pdf> <out.pdf> --trim-w N --trim-h N
+                                              write explicit no-bleed TrimBox on every page
+  s1c set-cover <in.pdf> <out.pdf> --trim-w N --trim-h N [--spine-w N] [--bleed 3]
+                                              centered TrimBox + full-page BleedBox;
+                                              --trim-w = front+back WITHOUT spine
+                                              (spine width is added for you; get it
+                                              from the vendor's calculator)
+  Also runnable standalone: python pdf_bleed_tool.py check|set-interior|set-cover ...
+  (ADR 019)
+
+------------------------------------------------------------
+SYSTEM 2 — COORDINATION (runs S1's tasks for you)
+------------------------------------------------------------
+  s2 status <slug>                    what's done / stale / ready / blocked
+  s2 run <slug> [--only s1b|s1d] [--step]   run every ready task until nothing's left
+  s2 homeostat run                    runs the full S5 homeostat chain (see below)
+  s2 homeostat status                 last recorded outcome of each homeostat stage
+  s2 newsletter run                   runs the full newsletter chain (see above)
+
+------------------------------------------------------------
+SYSTEM 3 — PERFORMANCE MONITORING
+------------------------------------------------------------
+  s3 dashboard                        portfolio-wide: cost, duration, outliers
+  s3 dashboard <slug>                 one book, task by task
+  s3 sales-ingest <slug> <csv> [--format ingramspark|kdp]   ingest a royalty CSV
+
+------------------------------------------------------------
+SYSTEM 4 — STRATEGIC INTELLIGENCE (no book involved)
+------------------------------------------------------------
+  s4 scan                             pull new items from your watchlist (systems/s4/sources.yaml)
+  s4 briefing <scan combined.txt>     scan -> strategic briefing
+  s4 content-strategy <briefing combined.txt>   briefing -> one grounded article-angle brief
+
+------------------------------------------------------------
+SYSTEM 5 — IDENTITY, VALUES & POLICY (advisory only, nothing auto-decides)
+------------------------------------------------------------
+  s5 evaluate <candidate brief.txt>          verdict: fits / borderline / doesn't fit
+  candidate record-decision <slug> <acquired|declined|deferred>   log your real decision
+  s5 check-policy-sync [--update]            checks prompt hasn't drifted from docs/vsm.md
+  s5 log-decision "<tension>" "<decision>"   append one line to the homeostat decision log
+
+  Homeostat dashboard (periodic — normally run via "s2 homeostat run", not by hand):
+  s5 homeostat-scan / s5 homeostat / s5 homeostat-render
+
+------------------------------------------------------------
+TIP: run "uv run python pipeline.py <system> --help" any time — s1b, s1d and s4
+are generated live from each systems/<sN>/tasks.yaml, so --help always matches
+whatever's actually configured. (s1c, s2, s3, s5 and book/candidate are
+hand-written commands, but --help works for them too.)
+
+NOTES
+  - LLM provider: google-aistudio (default) or mistral, set via llm.provider in
+    config.yaml; only the matching API key in .env is needed (ADR 017).
+  - s1b chunk size follows the selected provider automatically (ADR 018); there
+    is no per-run flag for it.
