@@ -30,6 +30,12 @@ _MAX_RETRY_SECONDS = 600  # 10 minutes total, cumulative across all retries
 _INITIAL_BACKOFF_SECONDS = 2
 _MAX_BACKOFF_SECONDS = 60  # cap per-wait so no single stretch is absurdly long
 
+# ADR 020: how long one model may return 503 continuously before the loop
+# switches to the next llm.fallback_models entry (opt-in; no effect unless
+# fallback_models is configured). Only 503 counts toward it — never a
+# timeout, a 429, or a 200-level finishReason failure.
+_DEFAULT_FALLBACK_AFTER_SECONDS = 60.0
+
 # Google no longer publishes a rate-limit table (its docs point at each
 # account's own AI Studio dashboard instead). Free-tier quotas ARE tracked
 # PER MODEL — confirmed the hard way during implementation, see ADR 017's
@@ -128,15 +134,29 @@ def _error_detail(response: httpx.Response) -> str:
 
 
 class GoogleAIStudioProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str, temperature: float = 0.0, thinking_level: str = "low"):
+    def __init__(self, api_key: str, model: str, temperature: float = 0.0, thinking_level: str = "low",
+                 fallback_models: list = None, fallback_after_seconds: float = _DEFAULT_FALLBACK_AFTER_SECONDS):
         self._api_key = api_key
-        self._model = model
         self._temperature = temperature
         self._thinking_level = thinking_level
+        # ADR 020: ordered candidates tried after `model` on sustained 503.
+        # Sticky for this instance's lifetime (one task run): once switched,
+        # later complete() calls stay on the fallback rather than re-paying
+        # a saturated primary's window on every chunk.
+        self._models = [model] + [m for m in dict.fromkeys(fallback_models or []) if m != model]
+        self._model_index = 0
+        self._fallback_after_seconds = fallback_after_seconds
+        # Models that actually served a request, in first-served order —
+        # read by engines/llm_text.py so the ledger records what really ran.
+        self.models_used = []
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
+    @property
+    def model(self) -> str:
+        """The model currently in use (the last one switched to, if any)."""
+        return self._models[self._model_index]
+
     def complete(self, system_prompt: str, user_prompt: str, temperature: float = None) -> str:
-        url = _API_URL_TEMPLATE.format(model=self._model)
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -155,8 +175,13 @@ class GoogleAIStudioProvider(LLMProvider):
 
         attempt = 0
         elapsed = 0.0
+        # ADR 020: elapsed-time mark of the current model's first 503 in an
+        # unbroken run of them, or None; any other outcome clears it.
+        unavailable_since = None
+        models_tried = [self.model]
         while True:
             network_exc, response, label = None, None, None
+            url = _API_URL_TEMPLATE.format(model=self.model)
             try:
                 response = httpx.post(url, headers=headers, json=payload, timeout=120.0)
             except httpx.TransportError as exc:
@@ -172,6 +197,21 @@ class GoogleAIStudioProvider(LLMProvider):
                     break  # success at the HTTP level — see below for generateContent-level checks
                 label = f"{response.status_code} from Google AI Studio: {_error_detail(response)}"
 
+            if response is not None and response.status_code == 503:
+                if unavailable_since is None:
+                    unavailable_since = elapsed
+                if (elapsed - unavailable_since >= self._fallback_after_seconds
+                        and self._model_index + 1 < len(self._models)):
+                    previous = self.model
+                    self._model_index += 1
+                    models_tried.append(self.model)
+                    click.echo(f"    503 on {previous} for {elapsed - unavailable_since:.0f}s — "
+                               f"switching to fallback {self.model}.")
+                    attempt, unavailable_since = 0, None
+                    continue  # straight to the fallback: no wait, same shared budget
+            else:
+                unavailable_since = None
+
             retry_after = response.headers.get("retry-after") if response is not None else None
             wait = float(retry_after) if retry_after else min(
                 _INITIAL_BACKOFF_SECONDS * (2 ** attempt), _MAX_BACKOFF_SECONDS
@@ -182,9 +222,10 @@ class GoogleAIStudioProvider(LLMProvider):
                 if network_exc is not None:
                     raise network_exc
                 hint = _RATE_LIMIT_HINT if response.status_code == 429 else ""
+                tried = f" Models tried: {', '.join(models_tried)}." if len(models_tried) > 1 else ""
                 raise click.ClickException(
                     f"Google AI Studio request failed: {response.status_code} after {attempt + 1} "
-                    f"attempt(s) over {elapsed:.0f}s — {_error_detail(response)}.{hint}"
+                    f"attempt(s) over {elapsed:.0f}s — {_error_detail(response)}.{hint}{tried}"
                 )
 
             attempt += 1
@@ -194,6 +235,9 @@ class GoogleAIStudioProvider(LLMProvider):
             time.sleep(wait)
 
         data = response.json()
+
+        if self.model not in self.models_used:
+            self.models_used.append(self.model)
 
         # Usage is recorded before any of the generateContent-level checks
         # below can raise — a blocked or truncated response still consumed
