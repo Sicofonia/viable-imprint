@@ -31,6 +31,24 @@ llm:
   # which are not the kind of problem-solving thinking helps with. Omit
   # this key to let the model's own default ("medium") apply.
   thinking_level: low
+  # Optional — docs/adr/020-google-aistudio-model-fallback.md. Google AI
+  # Studio only (ignored by Mistral). Models tried, in order, when the
+  # current model keeps returning 503 UNAVAILABLE ("high demand") for
+  # fallback_after_seconds (default 60). Only 503s trigger a switch — never
+  # timeouts, 429s or content-filter failures. Once switched, a run stays on
+  # the fallback until it ends; the next task run starts from `model` again.
+  # The manifest ledger records the model(s) that actually ran (`model`,
+  # plus `models_used` after a switch). Omit to keep no-fallback behavior.
+  # Cautions, all user-maintained like pricing/limits below: every entry must
+  # be a Gemini 3-family model accepting the same thinking_level, with an
+  # output-token ceiling at least llm.limits.max_output_tokens (chunks are
+  # sized for the primary); "similar performance" is your judgement, and
+  # cost_usd stays computed from the single pricing block below, so it is
+  # approximate after a switch. Model names go stale — re-check them.
+  # fallback_models:
+  #   - gemini-3.7-flash
+  #   - gemini-3.5-flash
+  # fallback_after_seconds: 60
   # Optional — System 3's `s3 dashboard` (ADR 005) uses this to turn captured
   # token counts into a cost figure. Omit this block entirely to skip cost
   # calculation; duration and token counts are captured either way. Prices

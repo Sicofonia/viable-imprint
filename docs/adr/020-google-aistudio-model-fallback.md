@@ -1,6 +1,6 @@
 # ADR 020 — Model Fallback on Sustained 503 for Google AI Studio
 
-**Status:** Proposed (2026-09-25). Design only — no code changes ship with this PR.
+**Status:** Implemented (2026-09-26) — see Implementation Notes for what was and was not verified with real calls.
 
 ---
 
@@ -196,22 +196,48 @@ per-model pricing tables ahead of a real need.
 
 ## Implementation Checklist
 
-- [ ] Verify each candidate fallback model ID against Google's current model list / the account's
-      rate-limit dashboard (do not assume the naming pattern), and confirm each accepts
-      `thinkingConfig.thinkingLevel: "low"` with one real call apiece
-- [ ] Add `llm.fallback_models` / `llm.fallback_after_seconds` to `config.example.yaml` with the
+- [x] Verify each candidate fallback model ID against Google's current model list — done via the
+      `models` list endpoint (IDs and 65,536 output ceilings confirmed). **Not done:** confirming
+      `thinkingLevel: "low"` with a real generation call — every attempt returned 503 (see notes)
+- [x] Add `llm.fallback_models` / `llm.fallback_after_seconds` to `config.example.yaml` with the
       output-ceiling and drift cautions from Decisions 1 and 6; wire through `providers/__init__.py`
-- [ ] Extend `GoogleAIStudioProvider`: per-model 503 window, switch + backoff reset, cumulative
+- [x] Extend `GoogleAIStudioProvider`: per-model 503 window, switch + backoff reset, cumulative
       budget shared across models, sticky-for-instance, `models_used`, loud console line on switch
-- [ ] Extend the final 503 error message to name every model tried
-- [ ] Update `llm_text.py` and `lib/metrics.py` to record the model(s) that actually served
+- [x] Extend the final 503 error message to name every model tried
+- [x] Update `llm_text.py` and `lib/metrics.py` to record the model(s) that actually served
       requests (`model`, plus `models_used` only when a switch occurred); confirm the ledger shape
       is byte-identical when no switch happens
-- [ ] Tests with a stubbed `httpx.post`: no fallback configured (unchanged); 503 then recovery on
+- [x] Tests with a stubbed `httpx.post`: no fallback configured (unchanged); 503 then recovery on
       the same model (no switch); sustained 503 → switch → success; sustained 503 on every model
       (fails at the shared budget, error names all models); `ReadTimeout` and 429 do **not**
       trigger a switch; stickiness across multiple `complete()` calls
-- [ ] One real end-to-end call forcing a switch (e.g. an intentionally invalid primary model
-      name is *not* a valid simulation — use a stubbed 503 for the primary and a real fallback)
-- [ ] Short real quality comparison, primary vs. each candidate fallback, on one manuscript excerpt
-- [ ] Update README's `providers/llm/` description
+- [ ] One real end-to-end call forcing a switch — **deliberately skipped** by the maintainer; the
+      first real production run that hits a 503 with `fallback_models` set is the validation
+- [ ] Short real quality comparison — **deliberately deferred** by the maintainer; `fallback_models`
+      stays commented out in `config.example.yaml`, so no fallback is recommended until it's done
+- [x] Update README's `providers/llm/` description
+
+---
+
+## Implementation Notes (2026-09-26)
+
+- **Stubbed tests, not real calls, carry the behavioral verification.** 14 `unittest` cases in
+  `tests/test_google_aistudio_fallback.py` (stdlib only — the repo has no test framework, and
+  none was added) cover every Decision 2/3/4 case listed above, plus config edge cases (duplicate
+  or primary-named fallback entries) and the ledger shape with and without a switch.
+- **Candidate IDs confirmed to exist:** `gemini-3.5-flash`, `gemini-3.7-flash`, `gemini-3.8-flash`
+  are all listed by Google's `models` endpoint with `outputTokenLimit: 65536` (equal to the
+  primary's `llm.limits.max_output_tokens`, satisfying Decision 6's ceiling precondition) and
+  thinking support. Only the model *list* was used for this — it consumes no generation quota.
+- **`thinkingLevel: "low"` acceptance is still unverified.** Single bounded generation requests
+  to all three candidates each returned `503 UNAVAILABLE` ("high demand"). A 503 is not a 400, so
+  it is weak evidence the payload shape is accepted, but it is not confirmation.
+- **A finding that weakens Context's premise, honestly recorded:** at the time of the probe, *all
+  three sibling models were returning the same 503 as the primary*, moments after the primary
+  itself was failing. The Context section argues sibling models are separate capacity pools; the
+  per-model *quota* buckets are confirmed (ADR 017), but this observation suggests *capacity*
+  pressure can hit the whole Flash line at once. The fallback is still correct and harmless — it
+  costs nothing when it doesn't help, and shares the same 600s budget — but it should not be
+  assumed to rescue every 503. If saturation across siblings turns out to be the norm, the
+  higher-value follow-ups are Flash-Lite entries (much larger RPD per the rate-limit dashboard,
+  quality unevaluated) and per-chunk checkpointing, not a longer fallback list.

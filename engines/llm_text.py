@@ -64,6 +64,19 @@ def _resolve_default_max_chars(config: dict) -> int:
     return int(max_output_tokens * _CHARS_PER_TOKEN_ESTIMATE)
 
 
+def _served_models(llm, config: dict) -> tuple:
+    """(model to record, models_used list or None) — ADR 020. With no
+    fallback switch this is exactly the configured model and None, so the
+    ledger shape is unchanged; after a switch it is the model that served
+    the final request plus the ordered list of every model that served one.
+    """
+    configured = config["llm"]["model"]
+    used = list(getattr(llm, "models_used", None) or [])
+    if not used or used == [configured]:
+        return configured, None
+    return used[-1], used
+
+
 def _normalize_headings(text: str) -> str:
     while _DOUBLED_HEADING_RE.search(text):
         text = _DOUBLED_HEADING_RE.sub("", text)
@@ -156,6 +169,11 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file.write_text(output_text, encoding="utf-8")
 
+    # ADR 020: record the model(s) that actually served requests, not just
+    # the configured primary — they differ only after a 503 fallback switch.
+    # Providers without fallback support (Mistral) have no models_used.
+    llm_model, models_used = _served_models(llm, config)
+
     key = manifest_key or output_name
     existing = manifest.load(root)
     source_kwargs = {} if "source" in existing else {"source": str(input_file.relative_to(root))}
@@ -166,9 +184,12 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
         # No fallback needed: get_llm_provider() above already raised if
         # llm.model was unset, so it's guaranteed present here — see
         # docs/adr/017-google-aistudio-llm-provider.md, Decision 7.
-        llm_model=config["llm"]["model"],
+        llm_model=llm_model,
         **source_kwargs,
     )
 
     click.echo(f"Saved: {output_file}")
-    return output_file, {"usage": llm.usage}
+    metrics = {"usage": llm.usage, "model": llm_model}
+    if models_used:
+        metrics["models_used"] = models_used
+    return output_file, metrics

@@ -39,12 +39,24 @@ def get_llm_provider(config: dict) -> LLMProvider:
             raise click.ClickException(
                 "GOOGLE_AISTUDIO_API_KEY is not set. Add it to your .env file."
             )
-        from providers.llm.google_aistudio import GoogleAIStudioProvider
+        from providers.llm.google_aistudio import GoogleAIStudioProvider, _DEFAULT_FALLBACK_AFTER_SECONDS
+        # ADR 020: optional, Google AI Studio only (Mistral ignores both keys).
+        fallback_models = config["llm"].get("fallback_models") or []
+        if not isinstance(fallback_models, list) or not all(isinstance(m, str) and m for m in fallback_models):
+            raise click.ClickException(
+                "llm.fallback_models must be a list of model-name strings "
+                "(e.g. ['gemini-3.7-flash']) — see config.example.yaml."
+            )
+        fallback_after = config["llm"].get("fallback_after_seconds", _DEFAULT_FALLBACK_AFTER_SECONDS)
+        if isinstance(fallback_after, bool) or not isinstance(fallback_after, (int, float)) or fallback_after < 0:
+            raise click.ClickException("llm.fallback_after_seconds must be a non-negative number of seconds.")
         return GoogleAIStudioProvider(
             api_key=api_key,
             model=model,
             temperature=config["llm"].get("temperature", 0.0),
             thinking_level=config["llm"].get("thinking_level", "low"),
+            fallback_models=fallback_models,
+            fallback_after_seconds=fallback_after,
         )
     raise ValueError(f"Unknown LLM provider: {name!r}. Supported: mistral, google-aistudio")
 

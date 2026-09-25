@@ -14,12 +14,17 @@ def enrich(raw_metrics: dict, config: dict) -> dict:
         return {}
 
     if "total_tokens" in usage:
-        return {
+        fields = {
             "provider": config["llm"]["provider"],
-            "model": config["llm"].get("model"),
+            # ADR 020: the engine reports the model that actually served
+            # requests (differs from config only after a fallback switch).
+            "model": raw_metrics.get("model") or config["llm"].get("model"),
             "usage": usage,
             "cost_usd": _llm_cost(usage, config["llm"].get("pricing")),
         }
+        if raw_metrics.get("models_used"):
+            fields["models_used"] = raw_metrics["models_used"]
+        return fields
 
     return {  # character-based usage (translation)
         "provider": config["translation"]["provider"],
