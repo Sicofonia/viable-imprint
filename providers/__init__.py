@@ -68,12 +68,16 @@ def get_llm_provider(config: dict) -> LLMProvider:
         thinking = config["llm"].get("thinking", "disabled")
         if thinking not in ("enabled", "disabled"):
             raise click.ClickException("llm.thinking must be 'enabled' or 'disabled' (Z.ai only).")
-        from providers.llm.zai import ZaiProvider
+        from providers.llm.zai import ZaiProvider, _DEFAULT_REQUEST_PACING_SECONDS
+        pacing = config["llm"].get("request_pacing_seconds", _DEFAULT_REQUEST_PACING_SECONDS)
+        if isinstance(pacing, bool) or not isinstance(pacing, (int, float)) or pacing < 0:
+            raise click.ClickException("llm.request_pacing_seconds must be a non-negative number of seconds.")
         return ZaiProvider(
             api_key=api_key,
             model=model,
             temperature=config["llm"].get("temperature", 0.0),
             thinking=thinking,
+            request_pacing_seconds=pacing,
         )
     raise ValueError(f"Unknown LLM provider: {name!r}. Supported: z-ai, mistral, google-aistudio")
 

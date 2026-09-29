@@ -82,10 +82,22 @@ class OpenAIChatProvider(LLMProvider):
     # Appended to the final error message when retries are exhausted on a 429.
     RATE_LIMIT_HINT: str = ""
 
-    def __init__(self, api_key: str, model: str, temperature: float = 0.0):
+    def __init__(self, api_key: str, model: str, temperature: float = 0.0,
+                 request_pacing_seconds: float = 0.0):
         self._api_key = api_key
         self._model = model
         self._temperature = temperature
+        # Minimum gap enforced between the *start* of one complete() call and
+        # the next on this instance — proactive, unlike everything else in
+        # this loop, which only ever reacts to a response already received.
+        # 0.0 (the default) is a no-op: MistralProvider doesn't set this, so
+        # its behavior is unchanged. Added for ZaiProvider after a real
+        # 29-chunk s1b ortho run got three 429s, evenly spread, each cleared
+        # by the very next attempt — see docs/adr/021-zai-glm4-flash-provider.md.
+        # This does not replace the retry/backoff loop below; it exists to
+        # make hitting it less frequent in the first place.
+        self._request_pacing_seconds = request_pacing_seconds
+        self._last_request_started_at = None
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     # --- hooks --------------------------------------------------------------
@@ -111,6 +123,14 @@ class OpenAIChatProvider(LLMProvider):
     # --- the shared loop ----------------------------------------------------
 
     def complete(self, system_prompt: str, user_prompt: str, temperature: float = None) -> str:
+        if self._request_pacing_seconds > 0 and self._last_request_started_at is not None:
+            wait = self._request_pacing_seconds - (time.monotonic() - self._last_request_started_at)
+            if wait > 0.05:
+                click.echo(f"    Pacing: waiting {wait:.1f}s before the next "
+                           f"request (llm.request_pacing_seconds={self._request_pacing_seconds})...")
+                time.sleep(wait)
+        self._last_request_started_at = time.monotonic()
+
         payload = {
             "model": self._model,
             "temperature": temperature if temperature is not None else self._temperature,

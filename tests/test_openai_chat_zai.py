@@ -117,6 +117,79 @@ class ZaiProviderTests(unittest.TestCase):
         self.assertEqual(provider.usage, {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30})
 
 
+class PacingTests(unittest.TestCase):
+    """openai_chat.py's proactive request_pacing_seconds — added after a real
+    29-chunk s1b ortho run got three 429s (see ADR 021's second Implementation
+    Notes section). A no-op for Mistral; Z.ai defaults to 1.0s.
+    """
+
+    def test_disabled_by_default_for_mistral(self):
+        provider, net = MistralProvider("KEY"), Net(ok(), ok())
+        sleeps = []
+        with mock.patch.object(openai_chat.httpx, "post", net.post), \
+             mock.patch.object(openai_chat.time, "sleep", sleeps.append), \
+             mock.patch.object(openai_chat.click, "echo"):
+            provider.complete("sys", "user")
+            provider.complete("sys", "user")
+        self.assertEqual(sleeps, [])  # pacing never engages when request_pacing_seconds is 0
+
+    def test_zai_defaults_to_one_second(self):
+        self.assertEqual(ZaiProvider("KEY", "glm-4.7-flash")._request_pacing_seconds, 1.0)
+
+    def test_first_call_is_never_paced(self):
+        net = Net(ok())
+        sleeps = []
+        with mock.patch.object(openai_chat.httpx, "post", net.post), \
+             mock.patch.object(openai_chat.time, "sleep", sleeps.append), \
+             mock.patch.object(openai_chat.click, "echo"):
+            ZaiProvider("KEY", "glm-4.7-flash").complete("sys", "user")
+        self.assertEqual(sleeps, [])
+
+    def test_second_call_waits_out_the_remaining_gap(self):
+        net = Net(ok(), ok())
+        provider = ZaiProvider("KEY", "glm-4.7-flash")  # 1.0s pacing
+        sleeps, echoes = [], []
+        # 3 monotonic() reads: call 1's baseline (t=1000.0), call 2's elapsed
+        # check (t=1000.1, i.e. 0.1s really "passed"), call 2's new baseline.
+        with mock.patch.object(openai_chat.httpx, "post", net.post), \
+             mock.patch.object(openai_chat.time, "sleep", sleeps.append), \
+             mock.patch.object(openai_chat.time, "monotonic", side_effect=[1000.0, 1000.1, 1000.1]), \
+             mock.patch.object(openai_chat.click, "echo", echoes.append):
+            provider.complete("sys", "user")
+            provider.complete("sys", "user")
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 0.9, places=6)  # 1.0s pacing - 0.1s already elapsed
+        self.assertTrue(any("Pacing" in e for e in echoes))
+
+    def test_no_extra_wait_once_the_gap_is_already_satisfied(self):
+        net = Net(ok(), ok())
+        provider = ZaiProvider("KEY", "glm-4.7-flash")
+        sleeps = []
+        # Second call arrives 2s after the first — already past the 1.0s gap.
+        with mock.patch.object(openai_chat.httpx, "post", net.post), \
+             mock.patch.object(openai_chat.time, "sleep", sleeps.append), \
+             mock.patch.object(openai_chat.time, "monotonic", side_effect=[1000.0, 1002.0, 1002.0]), \
+             mock.patch.object(openai_chat.click, "echo"):
+            provider.complete("sys", "user")
+            provider.complete("sys", "user")
+        self.assertEqual(sleeps, [])
+
+    def test_configured_pacing_used_over_default(self):
+        provider = ZaiProvider("KEY", "glm-4.7-flash", request_pacing_seconds=3.0)
+        self.assertEqual(provider._request_pacing_seconds, 3.0)
+
+    def test_pacing_disabled_via_zero(self):
+        net = Net(ok(), ok())
+        provider = ZaiProvider("KEY", "glm-4.7-flash", request_pacing_seconds=0)
+        sleeps = []
+        with mock.patch.object(openai_chat.httpx, "post", net.post), \
+             mock.patch.object(openai_chat.time, "sleep", sleeps.append), \
+             mock.patch.object(openai_chat.click, "echo"):
+            provider.complete("sys", "user")
+            provider.complete("sys", "user")
+        self.assertEqual(sleeps, [])
+
+
 class MistralSubclassTests(unittest.TestCase):
     def test_request_shape_unchanged(self):
         net = Net(ok())
@@ -164,6 +237,28 @@ class DispatchTests(unittest.TestCase):
             provider = get_llm_provider(self.config())
         self.assertIsInstance(provider, ZaiProvider)
         self.assertEqual(provider._thinking, "disabled")
+        self.assertEqual(provider._request_pacing_seconds, 1.0)  # default, unset in config
+
+    def test_configured_pacing_flows_through(self):
+        with mock.patch.dict(os.environ, {"ZAI_API_KEY": "k"}):
+            provider = get_llm_provider(self.config(request_pacing_seconds=2.5))
+        self.assertEqual(provider._request_pacing_seconds, 2.5)
+
+    def test_zero_pacing_flows_through(self):
+        with mock.patch.dict(os.environ, {"ZAI_API_KEY": "k"}):
+            provider = get_llm_provider(self.config(request_pacing_seconds=0))
+        self.assertEqual(provider._request_pacing_seconds, 0)
+
+    def test_negative_pacing_rejected(self):
+        with mock.patch.dict(os.environ, {"ZAI_API_KEY": "k"}):
+            with self.assertRaises(click.ClickException) as ctx:
+                get_llm_provider(self.config(request_pacing_seconds=-1))
+        self.assertIn("request_pacing_seconds", ctx.exception.message)
+
+    def test_bool_pacing_rejected(self):
+        with mock.patch.dict(os.environ, {"ZAI_API_KEY": "k"}):
+            with self.assertRaises(click.ClickException):
+                get_llm_provider(self.config(request_pacing_seconds=True))
 
     def test_missing_key(self):
         with mock.patch.dict(os.environ, {"ZAI_API_KEY": ""}):
