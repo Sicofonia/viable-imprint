@@ -28,6 +28,15 @@ llm:
   # off for this pipeline's transformation tasks; "enabled" turns it back
   # on. See docs/adr/021-zai-glm4-flash-provider.md.
   thinking: disabled
+  # Z.ai only. Minimum gap enforced between the start of one chunk's request
+  # and the next — proactive, unlike everything else about the retry loop,
+  # which only reacts once a 429 has already happened. Confirmed useful on a
+  # real 29-chunk run that got three 429s, evenly spread, each recovered by
+  # the retry loop's own next attempt — this doesn't replace that loop, it
+  # aims to make hitting it less frequent. 1.0 is a guess, not derived from a
+  # confirmed per-second ceiling (see docs/adr/021-zai-glm4-flash-provider.md);
+  # 0 disables it entirely, restoring the original back-to-back behavior.
+  request_pacing_seconds: 1.0
   # Optional — docs/adr/021-zai-glm4-flash-provider.md, Decision 5. For
   # Z.ai, the default chunk size for any llm_text task that sets no
   # max_chars of its own in tasks.yaml (an explicit task-level max_chars

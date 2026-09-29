@@ -432,3 +432,47 @@ and `s2 run`. In particular the twelve `single_chunk: true` / `max_chars: 100000
 set their own `max_chars`, so they will send ~100,000-character requests to Z.ai regardless of
 Decision 5's default; whether `glm-4.7-flash` handles those within `REQUEST_TIMEOUT`, and without
 `finish_reason: length`, is unknown until the first real run of one.
+
+---
+
+## Implementation Notes (2026-09-30) — proactive request pacing
+
+A real production run on `the-gobi-desert` (`s1b ortho`, 29 chunks) got three `429`s, spread
+roughly one every 8 chunks — each cleared by the retry loop's very next attempt, and the run
+completed with no data lost. Recovering every time isn't the same as not causing it: the account
+owner asked for a change that makes the pipeline less likely to trigger a 429 in the first place,
+not just better at recovering from one.
+
+**`openai_chat.py` gains `request_pacing_seconds`** (default `0.0`, a no-op — `MistralProvider`
+doesn't set it, so its behavior is unchanged): the minimum gap enforced between the *start* of
+one `complete()` call and the next on the same provider instance, tracked via
+`time.monotonic()`. This is proactive, unlike everything else in the retry loop, which only ever
+reacts to a response already received — it does not replace that loop, it aims to make hitting
+it less frequent. The first call on a fresh instance is never paced (nothing to measure a gap
+against yet); a call that already arrives late (generation itself took longer than the pacing
+window) gets no extra wait, since the gap is already satisfied.
+
+**`ZaiProvider` defaults `request_pacing_seconds` to `1.0`**, configurable via a new
+`llm.request_pacing_seconds` (Z.ai-only, `0` disables it, validated the same way as ADR 020's
+`fallback_after_seconds`). `1.0` is a guess, not derived from a confirmed per-second ceiling —
+named as such in both the code comment and `config.example.yaml`, the same honesty already
+applied to `max_context_chars`'s `6000`.
+
+**Validated with 6 deterministic stubbed tests** (`tests/test_openai_chat_zai.py`'s new
+`PacingTests`, part of 46 passing in total): pacing is a no-op for Mistral; a Z.ai instance's
+first call is never paced; a second call arriving 0.1s after the first (mocked `time.monotonic`)
+waits out the remaining ~0.9s of a 1.0s gap and echoes why; a second call arriving 2s after the
+first gets no extra wait; a configured or zero value overrides the default correctly.
+
+**Real-call confirmation was cut short, deliberately, not silently.** A real 2-chunk `s1b ortho`
+run (the same `books/test` excerpt as the original tracer) hit a slow or rate-limited response on
+its second chunk that outran this session's own tool-side process timeout before the retry loop's
+600s budget was exhausted — the process was killed externally, not by anything in this change,
+and nothing was written or corrupted (the ledger's prior `s1b.ortho` entry was left untouched). A
+separate single-chunk real call immediately after, exercising the same changed code path end to
+end, completed normally in 3.5s. Given the change under test is specifically about not sending the
+API more requests than necessary, retrying the 2-chunk case repeatedly to force a clean real
+confirmation was rejected as contrary to the point of the change; the deterministic unit tests
+above are the primary evidence for the pacing logic itself, real end-to-end operation was
+reconfirmed on the single-chunk path, and the full multi-chunk real case remains open — the next
+real multi-chunk run (e.g. resuming `the-gobi-desert`) is that confirmation.

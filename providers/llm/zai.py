@@ -23,6 +23,13 @@ from providers.llm.openai_chat import OpenAIChatProvider
 # full-size chunks are observed.
 _REQUEST_TIMEOUT_SECONDS = 300.0
 
+# Minimum gap enforced between the start of one chunk's request and the
+# next (openai_chat.py's request_pacing_seconds — a no-op for Mistral,
+# which doesn't set it). A guess, not derived from a confirmed per-second
+# ceiling — the same honesty as max_context_chars' 6000 above. Configurable
+# via llm.request_pacing_seconds; 0 disables it entirely.
+_DEFAULT_REQUEST_PACING_SECONDS = 1.0
+
 # Z.ai signals overload as a 429 carrying its own business code, not a 503:
 # a real "429, code 1305: The service may be temporarily overloaded, please
 # try again later" was returned during implementation after only a handful
@@ -30,6 +37,13 @@ _REQUEST_TIMEOUT_SECONDS = 300.0
 # attempt. The free tier's documented shape (third-party sources, not
 # confirmed against the account) is roughly one concurrent request, which
 # this pipeline already respects by sending chunks one at a time.
+#
+# Confirmed again on a real 29-chunk s1b ortho run (docs/adr/021-zai-glm4-
+# flash-provider.md's second Implementation Notes section): three 429s,
+# spread roughly every 8 chunks, each cleared on the very next attempt.
+# Recovering every time isn't the same as not causing it — see
+# _DEFAULT_REQUEST_PACING_SECONDS below, the proactive complement to this
+# reactive retry.
 _RATE_LIMIT_HINT = (
     " Z.ai returns 429 both for rate limits and for server overload — the "
     "code in the message tells them apart (1305 = temporarily overloaded, "
@@ -58,8 +72,9 @@ class ZaiProvider(OpenAIChatProvider):
     REQUEST_TIMEOUT = _REQUEST_TIMEOUT_SECONDS
     RATE_LIMIT_HINT = _RATE_LIMIT_HINT
 
-    def __init__(self, api_key: str, model: str, temperature: float = 0.0, thinking: str = "disabled"):
-        super().__init__(api_key, model, temperature)
+    def __init__(self, api_key: str, model: str, temperature: float = 0.0, thinking: str = "disabled",
+                 request_pacing_seconds: float = _DEFAULT_REQUEST_PACING_SECONDS):
+        super().__init__(api_key, model, temperature, request_pacing_seconds=request_pacing_seconds)
         self._thinking = thinking
 
     def _extra_payload(self) -> dict:
