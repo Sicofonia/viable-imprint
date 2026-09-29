@@ -18,8 +18,8 @@ def get_llm_provider(config: dict) -> LLMProvider:
         raise click.ClickException(
             "llm.model is not set in config.yaml. There is no sensible "
             "default across providers — set it explicitly (e.g. "
-            "'mistral-medium-latest' for Mistral, 'gemini-3.6-flash' for "
-            "Google AI Studio)."
+            "'glm-4.7-flash' for Z.ai, 'mistral-medium-latest' for Mistral, "
+            "'gemini-3.6-flash' for Google AI Studio)."
         )
     if name == "mistral":
         api_key = os.environ.get("MISTRAL_API_KEY")
@@ -58,7 +58,24 @@ def get_llm_provider(config: dict) -> LLMProvider:
             fallback_models=fallback_models,
             fallback_after_seconds=fallback_after,
         )
-    raise ValueError(f"Unknown LLM provider: {name!r}. Supported: mistral, google-aistudio")
+    if name == "z-ai":
+        api_key = os.environ.get("ZAI_API_KEY")
+        if not api_key:
+            raise click.ClickException(
+                "ZAI_API_KEY is not set. Add it to your .env file."
+            )
+        # ADR 021: Z.ai-only, ignored by the other providers.
+        thinking = config["llm"].get("thinking", "disabled")
+        if thinking not in ("enabled", "disabled"):
+            raise click.ClickException("llm.thinking must be 'enabled' or 'disabled' (Z.ai only).")
+        from providers.llm.zai import ZaiProvider
+        return ZaiProvider(
+            api_key=api_key,
+            model=model,
+            temperature=config["llm"].get("temperature", 0.0),
+            thinking=thinking,
+        )
+    raise ValueError(f"Unknown LLM provider: {name!r}. Supported: z-ai, mistral, google-aistudio")
 
 
 def get_translation_provider(config: dict) -> TranslationProvider:
