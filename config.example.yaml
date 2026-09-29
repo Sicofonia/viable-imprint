@@ -3,13 +3,55 @@
 # to commit.
 
 llm:
-  # Two providers are supported (see docs/adr/017-google-aistudio-llm-
-  # provider.md): "google-aistudio" (this project's default) or "mistral".
-  # They speak genuinely different wire formats (Gemini's generateContent
-  # vs. Mistral's OpenAI-style chat completions), unlike the two providers
-  # ADR 015 briefly added and later reverted — each is a fully
-  # self-contained file in providers/llm/, not a shared base.
-  provider: google-aistudio
+  # Three providers are supported: "z-ai" (this project's default, ADR 021),
+  # "google-aistudio" (ADR 017) and "mistral". Z.ai and Mistral both speak
+  # OpenAI-style chat completions and share one retry/backoff loop
+  # (providers/llm/openai_chat.py); Gemini's generateContent is a different
+  # wire format and keeps its own self-contained file. Every key below is
+  # read once for the whole pipeline — there is no per-task or per-book
+  # provider override. Keys specific to one provider are ignored by the
+  # others; switching providers means swapping the whole block (a complete
+  # Google AI Studio block is kept, commented out, further down).
+  provider: z-ai
+  # Required for every provider — there is no provider-agnostic default (a
+  # model name sent to the wrong provider just fails). glm-4.7-flash is free
+  # on Z.ai's pricing page and confirmed working against api.z.ai; ADR 021's
+  # original glm-4-flash does not exist there ("1211 Unknown Model" — it is
+  # a Zhipu China-platform model). mistral-medium-latest for Mistral.
+  model: glm-4.7-flash
+  # 0.0 = most deterministic / least creative. Recommended for editorial tasks
+  # (cleanup, ortho, copyedit) where fidelity to the source text matters more
+  # than fluency. Raise it only if output feels too rigid.
+  temperature: 0.0
+  # Z.ai only. GLM 4.5+ models reason by default, returned separately from
+  # the reply and billed/timed as output — "disabled" (the default) turns it
+  # off for this pipeline's transformation tasks; "enabled" turns it back
+  # on. See docs/adr/021-zai-glm4-flash-provider.md.
+  thinking: disabled
+  # Optional — docs/adr/021-zai-glm4-flash-provider.md, Decision 5. For
+  # Z.ai, the default chunk size for any llm_text task that sets no
+  # max_chars of its own in tasks.yaml (an explicit task-level max_chars
+  # always wins outright). Omit it to use the built-in 6000. A conservative
+  # first value, not derived from a confirmed limit: the "over 8K context ->
+  # throttled" figure it was first reasoned from belongs to GLM-4-Flash on
+  # Zhipu's China platform, not glm-4.7-flash. Raise it once real runs show
+  # response times on full-size chunks. (Google AI Studio uses
+  # limits.max_output_tokens instead — see the alternative block below.)
+  limits:
+    max_context_chars: 6000
+  # Optional — System 3's `s3 dashboard` (ADR 005) uses this to turn captured
+  # token counts into a cost figure. Omit it to skip cost calculation. Z.ai
+  # lists glm-4.7-flash as free, so this is a real 0, not the *shadow* paid
+  # rate recorded for Google AI Studio's free tier — there is no known paid
+  # rate to shadow (ADR 021, Decision 6). Re-check if Z.ai's terms change.
+  pricing:
+    prompt_per_million: 0.0
+    completion_per_million: 0.0
+
+  # ---- Alternative: Google AI Studio (ADR 017/018/020) -------------------
+  # To switch, replace the keys above with these (uncommented), and set
+  # GOOGLE_AISTUDIO_API_KEY in .env.
+  # provider: google-aistudio
   # There is no provider-agnostic default model name (a Mistral model name
   # sent to Google AI Studio, or vice versa, would just fail) — this key is
   # required regardless of which provider is selected. gemini-3.6-flash for
@@ -18,19 +60,19 @@ llm:
   # book; mistral-medium-latest for Mistral. Applies to every task — no
   # per-task model override exists yet (unlike temperature/max_chars, see
   # tasks.yaml).
-  model: gemini-3.6-flash
+  # model: gemini-3.6-flash
   # 0.0 = most deterministic / least creative. Recommended for editorial tasks
   # (cleanup, ortho, copyedit) where fidelity to the source text matters more
   # than fluency. Raise it only if output feels too rigid. Left at 0.0 for
   # Gemini deliberately, not evaluated against it yet — see the ADR.
-  temperature: 0.0
+  # temperature: 0.0
   # Google AI Studio (Gemini 3) only, ignored by Mistral. "low"/"medium"/
   # "high" — thinking is on by default for Gemini 3 models and cannot be
   # disabled entirely; thinking tokens are billed as output tokens. "low"
   # minimizes that cost for this pipeline's transformation/expansion tasks,
   # which are not the kind of problem-solving thinking helps with. Omit
   # this key to let the model's own default ("medium") apply.
-  thinking_level: low
+  # thinking_level: low
   # Optional — docs/adr/020-google-aistudio-model-fallback.md. Google AI
   # Studio only (ignored by Mistral). Models tried, in order, when the
   # current model keeps returning 503 UNAVAILABLE ("high demand") for
@@ -61,9 +103,9 @@ llm:
   # dependency instead of a uniformly misleading $0.00. These figures are
   # also promotional and double on 1 January 2027 (to $1.50 / $7.50) — a
   # known, dated change, not a placeholder to eventually verify.
-  pricing:
-    prompt_per_million: 0.75
-    completion_per_million: 3.75
+  # pricing:
+  #   prompt_per_million: 0.75
+  #   completion_per_million: 3.75
   # Optional — docs/adr/018-provider-aware-chunk-sizing.md. Used to derive a
   # safe default max_chars for any llm_text task that does not set its own
   # in tasks.yaml (an explicit task-level max_chars always wins outright —
@@ -76,8 +118,8 @@ llm:
   # (ai.google.dev / deepmind.google), not assumed from a blog post — see
   # the ADR's Decision 1 for why this lives in config rather than a
   # hardcoded constant.
-  limits:
-    max_output_tokens: 65536
+  # limits:
+  #   max_output_tokens: 65536
 
 translation:
   provider: deepl

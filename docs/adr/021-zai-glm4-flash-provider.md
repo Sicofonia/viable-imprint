@@ -1,8 +1,10 @@
 # ADR 021 — Z.ai (GLM-4-Flash) as the Default LLM Provider
 
-**Status:** Proposed (2026-09-29). Design only — no code changes ship with this PR. No `ZAI_API_KEY`
-exists yet, so nothing in this ADR has been validated against a real call; every number carried
-over from research is explicitly flagged as such below.
+**Status:** Implemented (2026-09-29), with two material corrections found before any code was
+written: GLM-4-Flash does not exist on `api.z.ai`, so the default model is **`glm-4.7-flash`**;
+and the 8K/1% throttle this ADR reasons from belongs to GLM-4-Flash, not to the model that
+shipped. The Decisions below are kept as designed; see **Implementation Notes (2026-09-29)** for
+what changed, what was validated with real calls, and what was not.
 
 ---
 
@@ -39,7 +41,7 @@ Studio were the only two providers and already anticipating this moment:
 > A third LLM provider is the trigger to extract this into a shared plain function
 > (url/headers/payload/display-name) — not a class hierarchy...
 
-Z.ai is, in the plain count of providers this project has actually built, the **third** (Mistral,//
+Z.ai is, in the plain count of providers this project has actually built, the **third** (Mistral,
 Groq, Google AI Studio, now Z.ai) — even though only two of those four ever shared this wire
 format. Per explicit direction from the account owner, weighed against the real risk that the
 last attempt at this exact extraction was thrown away days later: **this ADR extracts a shared
@@ -292,42 +294,42 @@ alongside the existing "why Gemini stays separate" reasoning.
 
 **Extraction (no behavior change except Decision 4's timeout):**
 
-- [ ] Create `providers/llm/openai_chat.py` with `OpenAIChatProvider(LLMProvider)`: payload
+- [x] Create `providers/llm/openai_chat.py` with `OpenAIChatProvider(LLMProvider)`: payload
       construction, the retry/backoff loop moved verbatim (budget, backoff shape,
       `httpx.TransportError` handling, original-exception re-raise), `usage` accumulation,
       `_error_detail()`, and the hooks `API_URL` / `DISPLAY_NAME` / `REQUEST_TIMEOUT` /
       `RATE_LIMIT_HINT` / `_extra_payload()` / `_log_rate_limit_headroom()` /
       `_is_fatal_rate_limit()` / `_extra_error_hint()`
-- [ ] Reduce `providers/llm/mistral.py` to a subclass, `REQUEST_TIMEOUT = 120.0`, every existing
+- [x] Reduce `providers/llm/mistral.py` to a subclass, `REQUEST_TIMEOUT = 120.0`, every existing
       comment and hint preserved verbatim in the relevant hook
-- [ ] Verify the extraction with a real Mistral call, confirming identical behavior to today's
-      `mistral.py`, not just a structurally-similar diff
+- [x] Verify the extraction — stubbed old-vs-new comparison across 9 scenarios, identical; a real
+      Mistral call reached the API through the new subclass but only got 429s (see notes)
 
 **Z.ai provider:**
 
-- [ ] Create `providers/llm/zai.py`: `ZaiProvider(OpenAIChatProvider)`, `REQUEST_TIMEOUT = 300.0`,
+- [x] Create `providers/llm/zai.py`: `ZaiProvider(OpenAIChatProvider)`, `REQUEST_TIMEOUT = 300.0`,
       the 8K/1%-concurrency `RATE_LIMIT_HINT` text (explicitly marked unverified in the string
       itself, pointing at the account dashboard)
-- [ ] Add the `z-ai` branch to `get_llm_provider()` with a `ZAI_API_KEY` check mirroring the
+- [x] Add the `z-ai` branch to `get_llm_provider()` with a `ZAI_API_KEY` check mirroring the
       existing two; update the "Unknown LLM provider" message to list all three
-- [ ] Add `ZAI_API_KEY` to `.env.example`
+- [x] Add `ZAI_API_KEY` to `.env.example`
 
 **Provider-aware chunk sizing:**
 
-- [ ] Add `llm.limits.max_context_chars` handling to `engines/llm_text.py`'s
+- [x] Add `llm.limits.max_context_chars` handling to `engines/llm_text.py`'s
       `_resolve_default_max_chars()`: when `llm.provider == "z-ai"`, use `max_context_chars` if
       set, else the hardcoded `6000` fallback; every other provider's behavior is unchanged
-- [ ] Confirm an explicit per-task `max_chars` in `tasks.yaml` still overrides this unconditionally
+- [x] Confirm an explicit per-task `max_chars` in `tasks.yaml` still overrides this unconditionally
 
 **Config and docs:**
 
-- [ ] Update `config.example.yaml`: `z-ai` defaults, `max_context_chars` with the unverified
+- [x] Update `config.example.yaml`: `z-ai` defaults, `max_context_chars` with the unverified
       caveat spelled out in the comment, `pricing: 0.0`/`0.0` with the "no known paid tier"
       rationale
-- [ ] Update `config.yaml` to `provider: z-ai` / `model: glm-4-flash`
-- [ ] Update the README: Requirements section (`ZAI_API_KEY`), the provider-abstraction
+- [x] Update `config.yaml` to `provider: z-ai` / `model: glm-4.7-flash` (corrected — see notes)
+- [x] Update the README: Requirements section (`ZAI_API_KEY`), the provider-abstraction
       paragraph, the contribution-guidance paragraph
-- [ ] Stubbed-`httpx` unit tests (stdlib `unittest`, matching `tests/test_google_aistudio_
+- [x] Stubbed-`httpx` unit tests (stdlib `unittest`, matching `tests/test_google_aistudio_
       fallback.py`'s existing pattern): Mistral's retry/backoff behavior is unchanged after
       extraction; Z.ai's longer timeout is actually used; the rate-limit hint text appears on a
       retryable status; `_resolve_default_max_chars()`'s new Z.ai branch resolves correctly with
@@ -335,12 +337,98 @@ alongside the existing "why Gemini stays separate" reasoning.
 
 **Explicitly deferred to a follow-up pass, once `ZAI_API_KEY` exists:**
 
-- [ ] One real Z.ai call against the `books/test` fixture, confirming the model ID, response
+- [x] One real Z.ai call against the `books/test` fixture, confirming the model ID, response
       shape, and usage reporting work as designed
-- [ ] Confirm or correct the 8K-context/1%-concurrency figure against the real account dashboard
+- [x] ~~Confirm or correct the 8K-context/1%-concurrency figure~~ — moot: it belongs to
+      GLM-4-Flash, which isn't on `api.z.ai` (see notes). Checking `glm-4.7-flash`'s own limits on
+      the account dashboard is still open
 - [ ] Confirm or correct `REQUEST_TIMEOUT = 300.0` and `max_context_chars: 6000` against real
       observed response times and token counts
 - [ ] A short real quality comparison against Mistral/Gemini output, on the fidelity-critical
       `ortho`/`copyedit` tasks specifically (same standard ADR 015 applied to Groq)
-- [ ] Decide whether/how to adjust `ortho`/`copyedit`'s existing `max_chars: 40000` for Z.ai
-      specifically (see Consequences)
+- [x] ~~Decide whether/how to adjust `ortho`/`copyedit`'s existing `max_chars: 40000`~~ — moot:
+      that override was never committed (see notes), so both tasks already use the Z.ai default
+
+---
+
+## Implementation Notes (2026-09-29)
+
+**The designed default model does not exist on the platform this ADR targets.** The first real
+request, made before any code was written, returned `400 {"code": "1211", "message": "Unknown
+Model, please check the model code."}` for `glm-4-flash`, and the account's own model list
+(`GET /api/paas/v4/models`) doesn't include it. GLM-4-Flash is a model on Zhipu's China platform
+(`open.bigmodel.cn`), which is also, most likely, where the "over 8K context -> 1% of standard
+concurrency" text quoted in Context point 2 comes from. `glm-4.7-flash` and `glm-4.5-flash` —
+both listed free on Z.ai's pricing page, neither in the model-list response — each answered a
+real request correctly. The account owner chose **`glm-4.7-flash`**. Consequences for the
+Decisions:
+
+- **Decision 5's `6000` default lost its stated rationale, and was kept anyway, on purpose.** It
+  was derived from a throttle that applies to a different model. The account owner chose to keep
+  it as a conservative value rather than re-derive one from a single small test; the config
+  comment and the code comment say plainly that it is conservative, not derived, and should be
+  raised once real runs show response times on full-size chunks.
+- **Decision 4's `300.0`s timeout keeps its rationale** — the underlying lesson (a fixed client
+  timeout that a slow-but-healthy response can outlast) doesn't depend on which throttle applies.
+- **Decision 6's `0.0` pricing still holds** — `glm-4.7-flash` is listed free on Z.ai's pricing
+  page.
+
+**Two additions not in the Decisions, both driven by real responses:**
+
+- **`llm.thinking` (Z.ai only, default `disabled`).** GLM 4.5+ models reason by default,
+  returning a separate `reasoning_content` alongside `content` — billed and timed as output, like
+  Gemini's thinking (ADR 017 Decision 2). A real request with `"thinking": {"type": "disabled"}`
+  returned `reasoning_tokens: 0` and no `reasoning_content`, so it is off by default, and
+  `get_llm_provider()` accepts only `enabled`/`disabled`.
+- **Z.ai signals overload as `429` with its own business code, not `503`.** A real `429 {"code":
+  "1305", "message": "The service may be temporarily overloaded, please try again later"}` came
+  back four times across about eight small requests, each cleared by the shared loop's first
+  2-second retry. `ZaiProvider._error_detail()` appends the code (`(code 1305)`) so an exhausted
+  retry says which kind of 429 it was, and the rate-limit hint explains the distinction.
+
+**Hooks, as built, differ slightly from Decision 1's table:** `_is_fatal_rate_limit()` was not
+built — no structurally-fatal case exists for Z.ai (Decision 3 already said so), so it would be an
+unused hook. Two were added instead: `_error_detail()` as an overridable method (for the code
+above) and `_validate_content()` (Z.ai raises on a `finish_reason` other than `stop` — `length`
+with a lower-`max_chars` remedy — and on an empty reply, instead of writing a truncated or empty
+chunk to disk; Mistral keeps the original `choices[0].message.content` read, unchanged).
+
+**A premise in "What does NOT ship" was wrong.** It says `ortho`/`copyedit` carry a Gemini-era
+`max_chars: 40000` that would override the new Z.ai default. That override was only ever a local,
+uncommitted edit (stashed during the `the-gobi-desert` incident); `systems/s1b/tasks.yaml` on
+`main` has no `max_chars` for any `s1b` task. So `cleanup`/`ortho`/`copyedit` all use the Z.ai
+default already, and the named gap does not exist.
+
+**Mistral extraction — what was and was not verified:**
+
+- **Behavior equivalence, stubbed:** the pre-change `mistral.py` from `main` and the new subclass
+  were run side by side through 9 scripted scenarios (success; 429 then success; `retry-after`;
+  network error then success; fatal 400; non-JSON 401; 429 until the budget runs out; network
+  errors until the budget runs out; the low-headroom header echo). Request URL, timeout, payload,
+  every console line, every backoff wait, usage, return value and exception message were
+  identical in all 9.
+- **Real call:** reached Mistral through the new subclass (key accepted — a `429`, not a `401`)
+  and produced the same retry lines as before, but only 429s for the 60 seconds it was allowed to
+  run: this account's Mistral free tier is still rate-limited, the same condition ADR 015's own
+  real Mistral check hit. A successful real Mistral reply through the new code remains unobserved.
+
+**Z.ai tracer bullet — `s1b ortho`, `books/test` fixture only, no `translate`/DeepL:**
+
+- A 6,592-character excerpt of the fixture's existing Spanish text (16 paragraphs) resolved to
+  `max_chars=6000 (2 chunks)` from the new Z.ai default, absorbed one real `1305`, and finished
+  in about 20 seconds. Output byte-identical to input — expected, since this excerpt had already
+  been through `ortho` on Mistral, and consistent with the prompt's own "no changes is fine"
+  rule.
+- Because an unchanged output only shows fidelity, a second ~700-character snippet had four
+  errors planted, one per `ortho` rule that can be checked mechanically: straight quotes, an
+  unbracketed Roman numeral, an unseparated 5-digit number, and a year that must stay
+  unseparated. All four were handled correctly (`«…»`, `siglo [XV]`, `12.000`, `1925` untouched),
+  nothing else changed, and the paragraph count was preserved.
+- Ledger: `provider: z-ai`, `model: glm-4.7-flash`, real token usage (2,702 prompt / 1,714
+  completion for the 2-chunk run, no reasoning tokens), `cost_usd: 0.0`.
+
+**Not exercised:** any full-size manuscript chunk, `cleanup`/`copyedit`, `s1d`/`s4`/`s5` tasks,
+and `s2 run`. In particular the twelve `single_chunk: true` / `max_chars: 100000` tasks (ADR 014)
+set their own `max_chars`, so they will send ~100,000-character requests to Z.ai regardless of
+Decision 5's default; whether `glm-4.7-flash` handles those within `REQUEST_TIMEOUT`, and without
+`finish_reason: length`, is unknown until the first real run of one.

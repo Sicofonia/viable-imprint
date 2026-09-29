@@ -50,6 +50,15 @@ _CHARS_PER_TOKEN_ESTIMATE = 3.5
 # (Mistral, untouched by ADR 018; see that ADR's Consequences).
 _LEGACY_DEFAULT_MAX_CHARS = 8000
 
+# ADR 021 Decision 5: Z.ai's default is sized against an *input* ceiling
+# (llm.limits.max_context_chars), not ADR 018's output ceiling — a different
+# question. 6000 is deliberately conservative rather than derived: the
+# "over 8K context -> throttled" figure it was first reasoned from turned out
+# to belong to GLM-4-Flash on Zhipu's China platform, not to glm-4.7-flash on
+# api.z.ai. Kept as a safe first value; raise it via config once real runs
+# show response times on full-size chunks.
+_ZAI_DEFAULT_MAX_CONTEXT_CHARS = 6000
+
 
 def _resolve_default_max_chars(config: dict) -> int:
     """Provider-aware fallback max_chars, used only when a task's own
@@ -58,7 +67,10 @@ def _resolve_default_max_chars(config: dict) -> int:
     was passed in). See docs/adr/018-provider-aware-chunk-sizing.md,
     Decision 3.
     """
-    max_output_tokens = config.get("llm", {}).get("limits", {}).get("max_output_tokens")
+    llm = config.get("llm", {})
+    if llm.get("provider") == "z-ai":
+        return int(llm.get("limits", {}).get("max_context_chars", _ZAI_DEFAULT_MAX_CONTEXT_CHARS))
+    max_output_tokens = llm.get("limits", {}).get("max_output_tokens")
     if max_output_tokens is None:
         return _LEGACY_DEFAULT_MAX_CHARS
     return int(max_output_tokens * _CHARS_PER_TOKEN_ESTIMATE)
