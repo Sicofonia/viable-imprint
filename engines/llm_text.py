@@ -70,6 +70,9 @@ def _resolve_default_max_chars(config: dict) -> int:
     llm = config.get("llm", {})
     if llm.get("provider") == "z-ai":
         return int(llm.get("limits", {}).get("max_context_chars", _ZAI_DEFAULT_MAX_CONTEXT_CHARS))
+    if llm.get("provider") == "mistral":
+        # Same input-side knob as Z.ai; unset keeps the legacy 8000.
+        return int(llm.get("limits", {}).get("max_context_chars", _LEGACY_DEFAULT_MAX_CHARS))
     max_output_tokens = llm.get("limits", {}).get("max_output_tokens")
     if max_output_tokens is None:
         return _LEGACY_DEFAULT_MAX_CHARS
