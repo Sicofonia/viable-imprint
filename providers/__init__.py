@@ -28,10 +28,15 @@ def get_llm_provider(config: dict) -> LLMProvider:
                 "MISTRAL_API_KEY is not set. Add it to your .env file."
             )
         from providers.llm.mistral import MistralProvider
+        # Optional; unset keeps Mistral's original back-to-back behavior (0).
+        pacing = config["llm"].get("request_pacing_seconds", 0.0)
+        if isinstance(pacing, bool) or not isinstance(pacing, (int, float)) or pacing < 0:
+            raise click.ClickException("llm.request_pacing_seconds must be a non-negative number of seconds.")
         return MistralProvider(
             api_key=api_key,
             model=model,
             temperature=config["llm"].get("temperature", 0.0),
+            request_pacing_seconds=pacing,
         )
     if name == "google-aistudio":
         api_key = os.environ.get("GOOGLE_AISTUDIO_API_KEY")

@@ -24,8 +24,8 @@ from providers.llm.openai_chat import OpenAIChatProvider
 _REQUEST_TIMEOUT_SECONDS = 300.0
 
 # Minimum gap enforced between the start of one chunk's request and the
-# next (openai_chat.py's request_pacing_seconds — a no-op for Mistral,
-# which doesn't set it). A guess, not derived from a confirmed per-second
+# next (openai_chat.py's request_pacing_seconds — off by default for
+# Mistral, which opts in via the same llm.request_pacing_seconds key). A guess, not derived from a confirmed per-second
 # ceiling — the same honesty as max_context_chars' 6000 above. Configurable
 # via llm.request_pacing_seconds; 0 disables it entirely.
 _DEFAULT_REQUEST_PACING_SECONDS = 1.0

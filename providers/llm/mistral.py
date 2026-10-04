@@ -61,8 +61,9 @@ class MistralProvider(OpenAIChatProvider):
     REQUEST_TIMEOUT = 120.0
     RATE_LIMIT_HINT = _RATE_LIMIT_HINT
 
-    def __init__(self, api_key: str, model: str = "mistral-medium-latest", temperature: float = 0.0):
-        super().__init__(api_key, model, temperature)
+    def __init__(self, api_key: str, model: str = "mistral-medium-latest", temperature: float = 0.0,
+                 request_pacing_seconds: float = 0.0):
+        super().__init__(api_key, model, temperature, request_pacing_seconds=request_pacing_seconds)
 
     def _log_rate_limit_headroom(self, response: httpx.Response) -> None:
         _log_rate_limit_if_low(response)

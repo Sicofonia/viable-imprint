@@ -90,8 +90,8 @@ class OpenAIChatProvider(LLMProvider):
         # Minimum gap enforced between the *start* of one complete() call and
         # the next on this instance — proactive, unlike everything else in
         # this loop, which only ever reacts to a response already received.
-        # 0.0 (the default) is a no-op: MistralProvider doesn't set this, so
-        # its behavior is unchanged. Added for ZaiProvider after a real
+        # 0.0 (the default) is a no-op; Mistral stays at 0 unless
+        # llm.request_pacing_seconds is set. Added for ZaiProvider after a real
         # 29-chunk s1b ortho run got three 429s, evenly spread, each cleared
         # by the very next attempt — see docs/adr/021-zai-glm4-flash-provider.md.
         # This does not replace the retry/backoff loop below; it exists to

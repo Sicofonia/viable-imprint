@@ -28,7 +28,7 @@ llm:
   # off for this pipeline's transformation tasks; "enabled" turns it back
   # on. See docs/adr/021-zai-glm4-flash-provider.md.
   thinking: disabled
-  # Z.ai only. Minimum gap enforced between the start of one chunk's request
+  # Z.ai and Mistral (Mistral: unset = off; Z.ai: unset = 1.0). Minimum gap enforced between the start of one chunk's request
   # and the next — proactive, unlike everything else about the retry loop,
   # which only reacts once a 429 has already happened. Confirmed useful on a
   # real 29-chunk run that got three 429s, evenly spread, each recovered by
@@ -38,9 +38,9 @@ llm:
   # 0 disables it entirely, restoring the original back-to-back behavior.
   request_pacing_seconds: 1.0
   # Optional — docs/adr/021-zai-glm4-flash-provider.md, Decision 5. For
-  # Z.ai, the default chunk size for any llm_text task that sets no
+  # Z.ai (built-in 6000) and Mistral (built-in 8000), the default chunk size for any llm_text task that sets no
   # max_chars of its own in tasks.yaml (an explicit task-level max_chars
-  # always wins outright). Omit it to use the built-in 6000. A conservative
+  # always wins outright). Omit it to use the built-in value. A conservative
   # first value, not derived from a confirmed limit: the "over 8K context ->
   # throttled" figure it was first reasoned from belongs to GLM-4-Flash on
   # Zhipu's China platform, not glm-4.7-flash. Raise it once real runs show

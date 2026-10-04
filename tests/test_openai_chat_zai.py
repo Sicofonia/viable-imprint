@@ -133,6 +133,9 @@ class PacingTests(unittest.TestCase):
             provider.complete("sys", "user")
         self.assertEqual(sleeps, [])  # pacing never engages when request_pacing_seconds is 0
 
+    def test_mistral_pacing_is_configurable(self):
+        self.assertEqual(MistralProvider("KEY", request_pacing_seconds=1.0)._request_pacing_seconds, 1.0)
+
     def test_zai_defaults_to_one_second(self):
         self.assertEqual(ZaiProvider("KEY", "glm-4.7-flash")._request_pacing_seconds, 1.0)
 
@@ -227,6 +230,10 @@ class ChunkDefaultTests(unittest.TestCase):
     def test_mistral_unchanged(self):
         self.assertEqual(_resolve_default_max_chars({"llm": {"provider": "mistral"}}), 8000)
 
+    def test_mistral_configured(self):
+        config = {"llm": {"provider": "mistral", "limits": {"max_context_chars": 12000}}}
+        self.assertEqual(_resolve_default_max_chars(config), 12000)
+
 
 class DispatchTests(unittest.TestCase):
     def config(self, **llm):
@@ -259,6 +266,19 @@ class DispatchTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"ZAI_API_KEY": "k"}):
             with self.assertRaises(click.ClickException):
                 get_llm_provider(self.config(request_pacing_seconds=True))
+
+    def test_mistral_pacing_flows_through(self):
+        config = {"llm": {"provider": "mistral", "model": "mistral-medium-latest", "request_pacing_seconds": 1.0}}
+        with mock.patch.dict(os.environ, {"MISTRAL_API_KEY": "k"}):
+            provider = get_llm_provider(config)
+        self.assertIsInstance(provider, MistralProvider)
+        self.assertEqual(provider._request_pacing_seconds, 1.0)
+
+    def test_mistral_pacing_defaults_to_off(self):
+        config = {"llm": {"provider": "mistral", "model": "mistral-medium-latest"}}
+        with mock.patch.dict(os.environ, {"MISTRAL_API_KEY": "k"}):
+            provider = get_llm_provider(config)
+        self.assertEqual(provider._request_pacing_seconds, 0.0)
 
     def test_missing_key(self):
         with mock.patch.dict(os.environ, {"ZAI_API_KEY": ""}):
