@@ -102,7 +102,7 @@ def get_translation_provider(config: dict) -> TranslationProvider:
                 "receiver's https URL with no query string "
                 "(e.g. https://<project>.vercel.app/api/etranslation) — see receivers/etranslation-vercel/README.md."
             )
-        document_format = settings.get("document_format", "html")
+        document_format = settings.get("document_format", "txt")
         if document_format not in ("html", "txt"):
             raise click.ClickException("translation.etranslation.document_format must be 'html' or 'txt'.")
         llm_enhanced = settings.get("llm_enhanced", False)

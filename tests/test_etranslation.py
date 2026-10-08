@@ -57,6 +57,8 @@ class Net:
             route = "status"
         elif url.endswith("/askTranslate"):
             route = "submit"
+        elif url.endswith("/getDomains"):
+            route = "domains"
         else:
             route = "poll" if method == "GET" else "delete"
         self.calls.append({"route": route, "method": method, "url": url, **kwargs})
@@ -77,11 +79,14 @@ def provider(**kwargs):
     return ETranslationProvider("app", "pw", RECEIVER, SECRET, **kwargs)
 
 
-def translate(p, net, text="Hello", **kw):
+def translate(p, net, text="Hello", echoes=None):
+    """Run one translate() with stubbed network; `echoes`, if given, collects
+    everything the provider printed."""
     with mock.patch.object(etranslation.httpx, "request", net.request), \
          mock.patch.object(etranslation.time, "sleep") as sleep, \
-         mock.patch.object(etranslation.click, "echo"):
-        out = p.translate(text, "en", "es", **kw) if kw else p.translate(text, "en", "es")
+         mock.patch.object(etranslation.click, "echo",
+                           side_effect=(lambda msg="", **_: echoes.append(msg)) if echoes is not None else None):
+        out = p.translate(text, "en", "es")
     return out, sleep
 
 
@@ -121,7 +126,7 @@ class SubmitTests(unittest.TestCase):
     def test_payload_shape_and_round_trip(self):
         net = Net(status=[STATUS_OK], submit=[ACCEPTED], poll=[delivered("<p>Hola <i>x</i></p><p>Adiós</p>")],
                   delete=[resp(200)])
-        p = provider()
+        p = provider(document_format="html")  # the default is txt; this covers the html path
         p._reference = "book/stem"
         out, _ = translate(p, net, "Hello [i]x[/i]\n\nBye")
         self.assertEqual(out, "Hola [i]x[/i]\n\nAdiós")
@@ -202,6 +207,57 @@ class SubmitTests(unittest.TestCase):
         with self.assertRaises(click.ClickException) as cm:
             translate(provider(), net)
         self.assertNotIn(SECRET, cm.exception.message)
+
+
+class LlmSupportWarningTests(unittest.TestCase):
+    # Shaped like this account's real answer: GEN has glossary but no LLM variant.
+    DOMAINS = {"GEN": {"languagePairs": ["EN-ES-GLS", "EN-FR-LLM"]},
+               "SPD": {"languagePairs": ["EN-ES-LLM-GLS"]},
+               "ECJ": {"languagePairs": ["EN-ES-LLM"]}}
+
+    def run_with(self, domains_route, **kwargs):
+        net = Net(status=[STATUS_OK], domains=domains_route, submit=[ACCEPTED],
+                  poll=[delivered("<p>Hola</p>")], delete=[resp(200)])
+        echoes = []
+        p = provider(**kwargs)
+        out, _ = translate(p, net, echoes=echoes)
+        self.assertEqual(out, "Hola")  # a warning never stops the run
+        return net, " ".join(echoes)
+
+    def test_warns_when_the_domain_has_no_llm_variant_and_names_the_ones_that_do(self):
+        net, said = self.run_with([resp(200, self.DOMAINS)], llm_enhanced=True, domain="GEN")
+        self.assertIn("domain GEN has no LLM variant for EN-ES", said)
+        self.assertIn("ECJ, SPD", said)
+        self.assertEqual(len(net.of("submit")), 1)
+
+    def test_silent_when_the_domain_has_an_llm_variant(self):
+        for domain in ("SPD", "ECJ"):
+            _, said = self.run_with([resp(200, self.DOMAINS)], llm_enhanced=True, domain=domain)
+            self.assertNotIn("LLM variant", said, domain)
+
+    def test_list_shaped_answer_is_read_too(self):
+        as_list = [{"domain": d, "languagePairs": v["languagePairs"]} for d, v in self.DOMAINS.items()]
+        _, said = self.run_with([resp(200, as_list)], llm_enhanced=True, domain="GEN")
+        self.assertIn("no LLM variant", said)
+
+    def test_no_extra_call_unless_llm_is_requested(self):
+        for llm in (False, None):
+            net = Net(status=[STATUS_OK], submit=[ACCEPTED], poll=[delivered("<p>Hola</p>")], delete=[resp(200)])
+            translate(provider(llm_enhanced=llm), net)  # a getDomains call would fail the test
+            self.assertEqual(net.of("domains"), [])
+
+    def test_unreadable_domain_list_is_skipped_quietly(self):
+        for broken in ([httpx.ConnectError("x")], [resp(500)], [resp(200, "not a domain list")]):
+            _, said = self.run_with(broken, llm_enhanced=True, domain="GEN")
+            self.assertNotIn("LLM variant", said)
+
+    def test_checked_once_per_provider_instance(self):
+        net = Net(status=[STATUS_OK], domains=[resp(200, self.DOMAINS)], submit=[ACCEPTED],
+                  poll=[delivered("<p>Hola</p>")], delete=[resp(200)])
+        p = provider(llm_enhanced=True, domain="GEN")
+        translate(p, net, "one")
+        translate(p, net, "two")
+        self.assertEqual(len(net.of("domains")), 1)
 
 
 class PollingTests(unittest.TestCase):
@@ -402,7 +458,7 @@ class FactoryTests(unittest.TestCase):
         self.assertEqual((p.domain, p.document_format, p.llm_enhanced, p.poll_interval_seconds, p.timeout_minutes),
                          ("SPD", "txt", None, 10.0, 5.0))
         defaults = self.make()
-        self.assertEqual((defaults.domain, defaults.document_format, defaults.llm_enhanced), ("GEN", "html", False))
+        self.assertEqual((defaults.domain, defaults.document_format, defaults.llm_enhanced), ("GEN", "txt", False))
 
     def test_missing_credentials_are_all_named(self):
         with self.assertRaises(click.ClickException) as cm:

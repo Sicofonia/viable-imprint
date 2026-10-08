@@ -1,6 +1,6 @@
 # ADR 022 — eTranslation as the Default Translation Provider
 
-**Status:** Implemented (2026-10-08), receiver deployed and verified; the provider is verified against stubbed responses only — real-call validation against eTranslation is still pending. See **Implementation Notes**.
+**Status:** Implemented (2026-10-08). Receiver deployed and verified; provider verified with real calls on a chapter-sized input. Not yet verified: resume after a real interruption, a full-length book, the `html` format, and the LLM-enhanced domains. See **Implementation Notes**.
 
 ---
 
@@ -338,7 +338,7 @@ into `config.yaml`).
 - [x] Confirm Vercel Hobby's commercial-use terms (or choose a plan/host that fits)
 - [ ] Optional: ask the DGT advisory team whether "pickup" delivery exists for REST v2 and this
       account (see Alternatives)
-- [ ] `GET /getDomains` with the account's credentials: confirm `EN-ES` is available on `GEN`, and
+- [x] `GET /getDomains` with the account's credentials: confirm `EN-ES` is available on `GEN`, and
       whether an `LLM`-suffixed pair is listed
 
 **Receiver (`receivers/etranslation-vercel/`):**
@@ -364,14 +364,15 @@ into `config.yaml`).
 
 **Real-call validation (the standard every provider so far has met):**
 
-- [ ] Tracer bullet on the `books/test` fixture: a short excerpt containing `[i]`, `[sc]`,
+- [x] Tracer bullet on the `books/test` fixture: a short excerpt containing `[i]`, `[sc]`,
       `[FN: ...[/FN]]`, a chapter heading block, and an `&` — check every marker survives, with
-      `document_format: html`, then with `txt`
-- [ ] Record real turnaround time; adjust `poll_interval_seconds` / `timeout_minutes`
+      `document_format: html`, then with `txt` — **done for `txt` only**: no `&`, and `html` was
+      not exercised against the real service (see Implementation Notes)
+- [x] Record real turnaround time; adjust `poll_interval_seconds` / `timeout_minutes`
 - [ ] Interrupt a run mid-poll and confirm the next run resumes the same `requestId`
 - [ ] Quality side by side: the same chapter through eTranslation (`llm_enhanced: false`, then
       `true`) against DeepL's existing output in `books/test`, judged by the account owner
-- [ ] Confirm the S3 dashboard shows `provider: etranslation` and `cost_usd: 0.0`
+- [x] Confirm the S3 dashboard shows `provider: etranslation` and `cost_usd: 0.0`
 
 ---
 
@@ -423,20 +424,59 @@ not verified:
   rotated after the first test. The CLI never puts the receiver URL in an error message for the
   same reason.
 
+**Real runs against eTranslation (same day), on the `books/test` chapter (14,740 characters):**
+
+- **It works end to end.** Submit, delivery through the receiver, decode, write, ledger entry and
+  S3 dashboard row (`provider: etranslation`, `usage.characters`, `cost_usd: 0.0`) all behave as
+  designed, and the resume file is removed once the output is written.
+- **Turnaround was 63 s and 33 s** for that chapter. A full-length book's turnaround is still
+  unknown, so the polling defaults remain guesses, but they look generous at this size.
+- **Markup survived with `document_format: txt`.** Line count (75 in, 75 out), the two-line
+  chapter heading, `[i]kang[/i]`, `[sc]VIII[/sc]` and an `[FN: ...[/FN]]` footnote (with its text
+  translated) all came back intact, and nothing HTML-shaped leaked. **This changed the default
+  from Decision 5's `html` to `txt`**: it is the only format proven with real calls, it needs no
+  conversion code in the path, and it is what the Commission calls its most efficient format. The
+  `html` mode is kept and tested offline, but no real call has exercised it.
+- **`llm_enhanced: true` did nothing on `GEN`, and the reason is the domain.** The account's
+  `GET /getDomains` shows EN to ES as glossary-only on `GEN` and `IPO`, plain on `QE`, and with an
+  LLM variant only on `SPD`, `ECB` and `ECJ` (specialist, institutional domains). A second run
+  with the flag set produced a translation identical to the first except for the two lines whose
+  input had been edited. eTranslation ignores the flag silently, so the provider now reads
+  `getDomains` once per run when `llm_enhanced` is true and warns, naming the domains that do
+  have an LLM variant. It never stops a run.
+- **`GEN` supports a glossary** (`EN-ES-GLS`), which makes the glossary feature deferred in "What
+  does NOT ship" feasible on the domain this project uses, without giving up the default.
+
+**Quality, stated plainly.** On the one chapter compared against the earlier DeepL-derived text
+(the `ortho` output, so not a perfectly clean baseline), eTranslation's plain machine
+translation was noticeably more literal: *asses* became *culos*, *bolted* became *atornillada*,
+*walls* became *paredes*, a heading word (*RUMOURS*) was left untranslated, and *five hundred
+yards* became *500 metros* — a silent unit conversion that no later step can catch, since `ortho`
+and `copyedit` never see the English. The account owner's own reading was "OK-ish". The
+accepted trade is a free service in exchange for a closer read of the output; DeepL stays
+selectable. One chapter is a small sample, and the specialist LLM domains have not been tried at
+the time of writing.
+
+**Overwrite incident, for the record.** `s1b translate` writes to the same path as the input's
+name, so the first real run replaced `books/test/s1b/translated/es/zayagan-chp1.txt`, the raw
+DeepL translation earlier ADRs reused as an `ortho` fixture. The `ortho/` and `copyedit/` outputs
+derived from it were untouched; the raw DeepL text is gone. The run was started on the author's
+instruction without warning of this.
+
 **Verified:**
 
 - The receiver, on the real deployment, against the real private store: a request with no token
   gets `401`; a write, a read-back, a delete and a second read-back behave as designed.
+- The provider, with real calls: submit, delivery, decode and write in `txt` mode, markup
+  preservation as above, ledger and dashboard recording.
 - Unit tests, all offline: the receiver's handler (10 Node tests) and the provider, markup
-  conversion, resume, chunk size, pricing and factory validation (33 Python tests).
+  conversion, resume, LLM-support warning, chunk size, pricing and factory validation (39 Python
+  tests).
 
 **Not verified, and not to be read as settled:**
 
-- **Any real call to eTranslation.** The provider has only been run against stubbed responses
-  built from the published OpenAPI spec. Every real-call item in the checklist is open: that the
-  engine preserves `[i]`/`[sc]`, `<br/>` and footnote text through an actual translation, the
-  real turnaround time (30 s polling and a 120 minute timeout are guesses), resume after a real
-  interruption, and the quality of the Spanish on this material.
-- `GET /getDomains` for this account (that `EN-ES` exists on `GEN`, and whether an LLM-suffixed
-  pair is listed).
+- **Resume after a real interruption** (it is covered by offline tests only).
+- **A full-length book:** turnaround, and whether one request of that size behaves like a chapter.
+- **The `html` document format** against the real service.
+- **The LLM-enhanced domains** (`SPD`, `ECB`, `ECJ`) on this material.
 - The "pickup" delivery mode in the error-code list remains undocumented and unasked about.

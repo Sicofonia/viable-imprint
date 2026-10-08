@@ -142,10 +142,16 @@ translation:
     # The deployed receiver's URL. https, no query string.
     receiver_url: https://your-project.vercel.app/api/etranslation
     domain: GEN                   # "General text"; the Commission's GET /getDomains lists the rest
-    document_format: html         # html | txt — html carries [i]/[sc] as inline tags; txt is sent as-is
+    # txt | html. txt sends the bracket markup ([i], [sc], [FN: ...]) as literal
+    # text and is proven with real calls; html converts it to inline tags and back
+    # and has only been tested offline.
+    document_format: txt
     # true / false / null. false is sent explicitly so a change to the account's
     # server-side default cannot silently change the output; null omits the llm
     # block entirely (needed if the account is not allowed to use LLM enhancement).
+    # LLM enhancement exists only in some domains: on the account this was built
+    # with, SPD, ECB and ECJ have it for EN->ES and GEN does not, so true on GEN is
+    # silently ignored by eTranslation. The provider warns when that happens.
     llm_enhanced: false
     # Both are guesses, not measured turnaround times — revisit after a real book.
     poll_interval_seconds: 30

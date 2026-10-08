@@ -8,15 +8,19 @@ in a small receiver deployed on Vercel (`receivers/etranslation-vercel/`) and
 out`, same as every other provider.
 
 Every chunk is sent as ONE whole-document request (the Commission's own
-guidance for anything over its 5,000-character snippet limit), as HTML so that
-`[i]`/`[sc]` survive as inline tags — see `to_html()`/`from_html()`.
+guidance for anything over its 5,000-character snippet limit). The default
+`document_format` is "txt": the bracket markup (`[i]`, `[sc]`, `[FN: ...]`) is
+sent as literal text, which a real run on this account carried through intact.
+"html" is the alternative — `to_html()`/`from_html()` turn the markup into
+inline tags and back — and is covered by offline tests only; no real call has
+exercised it.
 
 Verified against the Commission's published REST v2 OpenAPI spec and Dev
-Corner pages. NOT yet verified against a real account, and stated as such
-rather than assumed: that eTranslation's engine preserves these tags and
-`<br/>` line breaks through a real translation, how long a full book takes
-(`poll_interval_seconds` / `timeout_minutes` are guesses), and the quality of
-its output on 19th-century travel prose. See ADR 022's checklist.
+Corner pages, and with real calls on a 15K-character chapter (63 s and 33 s;
+structure and all marker types preserved). NOT verified: a full-length book's
+turnaround (`poll_interval_seconds` / `timeout_minutes` are guesses), the html
+format, and resume after a real interruption. Translation quality on this
+material is plain machine translation and noticeably literal — see ADR 022.
 """
 import base64
 import hashlib
@@ -170,7 +174,7 @@ class ETranslationProvider(TranslationProvider):
     max_chars_per_request = 2_000_000
 
     def __init__(self, app_name: str, password: str, receiver_url: str, receiver_secret: str,
-                 *, domain: str = "GEN", document_format: str = "html",
+                 *, domain: str = "GEN", document_format: str = "txt",
                  llm_enhanced=False, poll_interval_seconds: float = 30.0,
                  timeout_minutes: float = 120.0):
         self._auth = httpx.BasicAuth(app_name, password)
@@ -184,6 +188,7 @@ class ETranslationProvider(TranslationProvider):
         # Local count of source characters translated by this task run —
         # eTranslation reports no billed-character figure of its own.
         self.usage = {"characters": 0}
+        self._llm_support_checked = False
         self._state_file = None
         self._state: dict = {}
         self._reference = "viable-imprint"
@@ -234,6 +239,7 @@ class ETranslationProvider(TranslationProvider):
                        f"(submitted {entry.get('submitted_at', 'earlier')})...")
         else:
             self._check_status()
+            self._warn_if_llm_unsupported(source, target)
             request_id = self._submit(text, source, target)
             entry = {"request_id": request_id,
                      "submitted_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -277,6 +283,42 @@ class ETranslationProvider(TranslationProvider):
             )
         elif level == 2:
             click.echo("  eTranslation reports critical load (level 2) — expect delays.")
+
+    def _warn_if_llm_unsupported(self, source: str, target: str) -> None:
+        """`llm_enhanced: true` on a domain with no LLM variant for the language
+        pair is silently ignored by eTranslation — a real run on this account's
+        GEN domain returned plain machine translation, byte-identical to a run
+        without it. Warn instead of letting a no-op look like a setting that
+        worked. Once per provider instance; advisory, so any failure to read
+        the list is skipped, like the status check."""
+        if self.llm_enhanced is not True or self._llm_support_checked:
+            return
+        self._llm_support_checked = True
+        try:
+            resp = httpx.request("GET", f"{API_BASE}/getDomains", auth=self._auth, timeout=30.0)
+            data = resp.json() if resp.status_code == 200 else None
+        except (httpx.TransportError, ValueError):
+            return
+        # The spec shows two shapes (an object keyed by domain, and a list of
+        # {domain, languagePairs}); read either.
+        if isinstance(data, dict):
+            entries = {name: (v or {}).get("languagePairs", []) for name, v in data.items()}
+        elif isinstance(data, list):
+            entries = {e.get("domain"): e.get("languagePairs", []) for e in data}
+        else:
+            return
+        if self.domain not in entries:
+            return
+        pair = f"{source}-{target}"
+        # Variants look like EN-ES, EN-ES-GLS, EN-ES-LLM, EN-ES-LLM-GLS.
+        if not any(p.startswith(pair + "-") and "LLM" in p.split("-")[2:] for p in entries[self.domain]):
+            with_llm = sorted(d for d, pairs in entries.items()
+                              if any(p.startswith(pair + "-") and "LLM" in p.split("-")[2:] for p in pairs))
+            click.echo(
+                f"  Warning: domain {self.domain} has no LLM variant for {pair}, so llm_enhanced: true is "
+                "being ignored (plain machine translation). "
+                + (f"Domains that do: {', '.join(with_llm)}." if with_llm else "No domain on this account does.")
+            )
 
     def _callback(self, kind: str) -> str:
         return f"{self.receiver_url}?{urlencode({'kind': kind, 'token': self._secret})}"
