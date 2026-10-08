@@ -1,6 +1,6 @@
 # ADR 022 — eTranslation as the Default Translation Provider
 
-**Status:** Implemented (2026-10-08). Receiver deployed and verified; provider verified with real calls on a chapter-sized input. Not yet verified: resume after a real interruption, a full-length book, the `html` format, and the LLM-enhanced domains. See **Implementation Notes**.
+**Status:** Implemented (2026-10-08). Receiver deployed and verified; provider verified with real calls on a chapter-sized input. Not yet verified: resume after a real interruption, a full-length book, and the `html` format. Recommended settings: `domain: GEN`, `llm_enhanced: false`. See **Implementation Notes**.
 
 ---
 
@@ -370,8 +370,8 @@ into `config.yaml`).
       not exercised against the real service (see Implementation Notes)
 - [x] Record real turnaround time; adjust `poll_interval_seconds` / `timeout_minutes`
 - [ ] Interrupt a run mid-poll and confirm the next run resumes the same `requestId`
-- [ ] Quality side by side: the same chapter through eTranslation (`llm_enhanced: false`, then
-      `true`) against DeepL's existing output in `books/test`, judged by the account owner
+- [x] Quality side by side: the same chapter through eTranslation (`llm_enhanced: false`, then
+      `true`) against DeepL's existing output in `books/test`, judged by the account owner — done for GEN and for SPD+LLM, see Implementation Notes
 - [x] Confirm the S3 dashboard shows `provider: etranslation` and `cost_usd: 0.0`
 
 ---
@@ -444,6 +444,19 @@ not verified:
   input had been edited. eTranslation ignores the flag silently, so the provider now reads
   `getDomains` once per run when `llm_enhanced` is true and warns, naming the domains that do
   have an LLM variant. It never stops a run.
+- **The LLM-enhanced domain was then tried for real, and is not recommended.** The same chapter
+  on `domain: SPD` with `llm_enhanced: true` (33 s) fixed some of `GEN`'s mistakes (the heading was
+  translated, *asses* became *asnos*, *walls* became *murallas*) but introduced worse ones:
+  *yards* became *astilleros* (shipyards, so the sentence said there were scarcely 500 shipyards
+  *in the tobacco shop*), *pipes* became *tuberías* (plumbing), *Chinamen* became *chinicanos*,
+  *hospitable* became *hospitalizable*. It also **corrupted markup**: `[sc]VIII[/sc]` came back as
+  `VIII [/SC]` (opening tag dropped, closing tag upper-cased). `[i]` and the footnote survived. An
+  LLM-enhanced engine can edit this project's markers, which `txt` mode with plain machine
+  translation did not. **The recommended settings stay `domain: GEN`, `llm_enhanced: false`.**
+- **The resume file's chunk identity now includes domain, LLM mode and document format**, not
+  just the text and language pair (Decision 6 said text only). Found by that experiment: the same
+  chapter re-run after changing domain and LLM mode would otherwise have resumed, or reused the
+  result of, a request submitted with the old settings.
 - **`GEN` supports a glossary** (`EN-ES-GLS`), which makes the glossary feature deferred in "What
   does NOT ship" feasible on the domain this project uses, without giving up the default.
 
@@ -454,8 +467,8 @@ translation was noticeably more literal: *asses* became *culos*, *bolted* became
 yards* became *500 metros* — a silent unit conversion that no later step can catch, since `ortho`
 and `copyedit` never see the English. The account owner's own reading was "OK-ish". The
 accepted trade is a free service in exchange for a closer read of the output; DeepL stays
-selectable. One chapter is a small sample, and the specialist LLM domains have not been tried at
-the time of writing.
+selectable. One chapter is a small sample, and the same chapter on the specialist LLM domain `SPD` did
+worse overall (see above), so the trade stays as accepted.
 
 **Overwrite incident, for the record.** `s1b translate` writes to the same path as the input's
 name, so the first real run replaced `books/test/s1b/translated/es/zayagan-chp1.txt`, the raw
@@ -478,5 +491,5 @@ instruction without warning of this.
 - **Resume after a real interruption** (it is covered by offline tests only).
 - **A full-length book:** turnaround, and whether one request of that size behaves like a chapter.
 - **The `html` document format** against the real service.
-- **The LLM-enhanced domains** (`SPD`, `ECB`, `ECJ`) on this material.
+- **`ECB` and `ECJ`**, the other LLM-enhanced domains (only `SPD` was tried).
 - The "pickup" delivery mode in the error-code list remains undocumented and unasked about.

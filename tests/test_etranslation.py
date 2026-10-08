@@ -350,6 +350,19 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(out, "Adiós")
         self.assertEqual(len(net2.of("submit")), 1)
 
+    def test_changed_settings_are_not_matched_to_an_old_request_or_result(self):
+        # Found by a real experiment: the same chapter, re-run after switching
+        # domain and LLM mode, must be a new request — never the old settings'.
+        net = Net(status=[STATUS_OK], submit=[ACCEPTED], poll=[delivered("<p>Hola</p>")], delete=[resp(200)])
+        self.run_provider(net)  # leaves a received translation in the sidecar
+        for changed in ({"domain": "SPD"}, {"llm_enhanced": True}, {"llm_enhanced": None},
+                        {"document_format": "html"}):
+            net2 = Net(status=[STATUS_OK], domains=[resp(200, {})], submit=[resp(200, {"requestId": 456})],
+                       poll=[delivered("<p>Distinto</p>", 456)], delete=[resp(200)])
+            _, out = self.run_provider(net2, **changed)
+            self.assertEqual(out, "Distinto", changed)
+            self.assertEqual(len(net2.of("submit")), 1, changed)
+
     def test_a_received_translation_survives_in_the_sidecar_with_no_network(self):
         net = Net(status=[STATUS_OK], submit=[ACCEPTED], poll=[delivered("<p>Hola</p>")], delete=[resp(200)])
         self.run_provider(net)

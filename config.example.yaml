@@ -152,6 +152,8 @@ translation:
     # LLM enhancement exists only in some domains: on the account this was built
     # with, SPD, ECB and ECJ have it for EN->ES and GEN does not, so true on GEN is
     # silently ignored by eTranslation. The provider warns when that happens.
+    # Tried on SPD with true: some fixes, but invented words, changed meanings and
+    # a corrupted [sc] marker on one chapter — GEN with false is the recommendation.
     llm_enhanced: false
     # Both are guesses, not measured turnaround times — revisit after a real book.
     poll_interval_seconds: 30

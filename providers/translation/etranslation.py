@@ -225,7 +225,11 @@ class ETranslationProvider(TranslationProvider):
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> str:
         source, target = source_lang.upper(), target_lang.upper()
-        key = hashlib.sha256(f"{source}>{target}\n{text}".encode("utf-8")).hexdigest()
+        # A chunk's identity is everything that shapes the translation, not just
+        # its text: after changing domain, LLM mode or format and re-running, an
+        # interrupted request submitted with the old settings must not be resumed.
+        settings = f"{source}>{target}|{self.domain}|{self.llm_enhanced}|{self.document_format}"
+        key = hashlib.sha256(f"{settings}\n{text}".encode("utf-8")).hexdigest()
         entry = self._state.get(key)
 
         if entry and "translation" in entry:
