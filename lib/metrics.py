@@ -29,8 +29,20 @@ def enrich(raw_metrics: dict, config: dict) -> dict:
     return {  # character-based usage (translation)
         "provider": config["translation"]["provider"],
         "usage": usage,
-        "cost_usd": _translation_cost(usage, config["translation"].get("pricing")),
+        "cost_usd": _translation_cost(usage, _translation_pricing(config["translation"])),
     }
+
+
+def _translation_pricing(translation_config: dict):
+    """Pricing is per provider (ADR 022, Decision 5): a single top-level block
+    is provider-blind, so after a provider switch it would keep charging the
+    old provider's rate. The legacy top-level `translation.pricing` is still
+    honored, but only for DeepL — the only provider it was ever written for."""
+    provider = translation_config["provider"]
+    nested = (translation_config.get(provider) or {}).get("pricing")
+    if nested:
+        return nested
+    return translation_config.get("pricing") if provider == "deepl" else None
 
 
 def _llm_cost(usage: dict, pricing: dict) -> float:

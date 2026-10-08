@@ -1,6 +1,6 @@
 # ADR 022 — eTranslation as the Default Translation Provider
 
-**Status:** Proposed (2026-10-08). Design only; no code ships with this ADR.
+**Status:** Implemented (2026-10-08). Receiver deployed and verified; provider verified with real calls on a chapter-sized input. Not yet verified: resume after a real interruption, a full-length book, and the `html` format. Recommended settings: `domain: GEN`, `llm_enhanced: false`. See **Implementation Notes**.
 
 ---
 
@@ -335,40 +335,161 @@ into `config.yaml`).
 
 **Before writing code:**
 
-- [ ] Confirm Vercel Hobby's commercial-use terms (or choose a plan/host that fits)
+- [x] Confirm Vercel Hobby's commercial-use terms (or choose a plan/host that fits)
 - [ ] Optional: ask the DGT advisory team whether "pickup" delivery exists for REST v2 and this
       account (see Alternatives)
-- [ ] `GET /getDomains` with the account's credentials: confirm `EN-ES` is available on `GEN`, and
+- [x] `GET /getDomains` with the account's credentials: confirm `EN-ES` is available on `GEN`, and
       whether an `LLM`-suffixed pair is listed
 
 **Receiver (`receivers/etranslation-vercel/`):**
 
-- [ ] `api/etranslation.js`: POST (delivery/success/failure), GET (status/result), DELETE; secret
+- [x] `api/etranslation.js`: POST (delivery/success/failure), GET (status/result), DELETE; secret
       check in constant time; User-Agent filter on POSTs; idempotent overwrite storage
-- [ ] `package.json`, `README.md` with deploy steps
-- [ ] Deploy; confirm with `curl` that a POST without the secret gets `401` and a POST/GET/DELETE
+- [x] `package.json`, `README.md` with deploy steps
+- [x] Deploy; confirm with `curl` that a POST without the secret gets `401` and a POST/GET/DELETE
       round trip with it works
 
 **Pipeline:**
 
-- [ ] `providers/translation/etranslation.py`: status check, HTML conversion both ways, submit,
+- [x] `providers/translation/etranslation.py`: status check, HTML conversion both ways, submit,
       poll, delete, error-code messages, `usage`, sidecar resume (Decision 6)
-- [ ] `max_chars_per_request` on both providers; `engines/translation.py` reads it (Decision 4)
-- [ ] `get_translation_provider()` `etranslation` branch with key/URL checks
-- [ ] `lib/metrics.py`: per-provider pricing with the DeepL-only legacy fallback (Decision 5)
-- [ ] `config.example.yaml`, `.env.example`, README, cheat sheet
-- [ ] Stubbed-`httpx` unit tests (stdlib `unittest`, same pattern as `tests/test_openai_chat_zai.py`):
+- [x] `max_chars_per_request` on both providers; `engines/translation.py` reads it (Decision 4)
+- [x] `get_translation_provider()` `etranslation` branch with key/URL checks
+- [x] `lib/metrics.py`: per-provider pricing with the DeepL-only legacy fallback (Decision 5)
+- [x] `config.example.yaml`, `.env.example`, README, cheat sheet
+- [x] Stubbed-`httpx` unit tests (stdlib `unittest`, same pattern as `tests/test_openai_chat_zai.py`):
       HTML round trip of every markup case in Decision 1's table; submit payload shape; polling
       through `pending` → delivery and → failure; error-code messages; sidecar resume / stale-hash
       resubmit; per-provider pricing including the legacy fallback
 
 **Real-call validation (the standard every provider so far has met):**
 
-- [ ] Tracer bullet on the `books/test` fixture: a short excerpt containing `[i]`, `[sc]`,
+- [x] Tracer bullet on the `books/test` fixture: a short excerpt containing `[i]`, `[sc]`,
       `[FN: ...[/FN]]`, a chapter heading block, and an `&` — check every marker survives, with
-      `document_format: html`, then with `txt`
-- [ ] Record real turnaround time; adjust `poll_interval_seconds` / `timeout_minutes`
+      `document_format: html`, then with `txt` — **done for `txt` only**: no `&`, and `html` was
+      not exercised against the real service (see Implementation Notes)
+- [x] Record real turnaround time; adjust `poll_interval_seconds` / `timeout_minutes`
 - [ ] Interrupt a run mid-poll and confirm the next run resumes the same `requestId`
-- [ ] Quality side by side: the same chapter through eTranslation (`llm_enhanced: false`, then
-      `true`) against DeepL's existing output in `books/test`, judged by the account owner
-- [ ] Confirm the S3 dashboard shows `provider: etranslation` and `cost_usd: 0.0`
+- [x] Quality side by side: the same chapter through eTranslation (`llm_enhanced: false`, then
+      `true`) against DeepL's existing output in `books/test`, judged by the account owner — done for GEN and for SPD+LLM, see Implementation Notes
+- [x] Confirm the S3 dashboard shows `provider: etranslation` and `cost_usd: 0.0`
+
+---
+
+## Implementation Notes (2026-10-08)
+
+The Decisions above are kept as designed. What changed, what was found, and what was and was
+not verified:
+
+**Changes to the design, all small:**
+
+- **Vercel Pro, not Hobby.** The licensing question in Decision 2 was read against Vercel's
+  fair-use guidelines, which restrict Hobby to non-commercial personal use ("financial gain of
+  anyone involved in any part of the production"). The account owner moved the team to Pro.
+- **A private Blob store was confirmed available**, so the "private if the account offers it"
+  hedge became a plain requirement. The function authenticates through OIDC once the store is
+  connected to the project; no Blob token exists anywhere in this design. Private stores need
+  `@vercel/blob` >= 2.3 and Vercel CLI >= 50.20.
+- **The receiver logs an unexpected `User-Agent` instead of rejecting it** (Decision 2 said
+  "checked on POSTs as a cheap filter"). Rejecting on a header would turn any change on
+  eTranslation's side into a silent loss of every translation, for no security gain: the shared
+  secret is the actual gate.
+- **The sidecar also stores each received translation, not just request ids** (Decision 6).
+  Without that, a crash between deleting a result from the receiver and writing the output file
+  would lose a finished chunk with no way to recover it. A matching entry holding a translation is
+  returned with no network call at all.
+- **`llm_enhanced` is true / false / null**, not just a boolean (Decision 5). `null` omits the
+  `llm` block entirely, for an account that gets `LLM_NOT_ALLOWED` even when `enabled` is false.
+  Whether that can happen is unknown; the cost of allowing for it is one config value.
+- **Two optional hooks, `begin_run()` and `finish_run()`,** carry the sidecar's lifecycle between
+  `engines/translation.py` and the provider, alongside `max_chars_per_request` (all three
+  documented in `providers/translation/base.py`, read with `getattr()`, same convention as
+  `translate_document()`). Decision 6 left the plumbing unspecified.
+
+**Found while deploying the receiver, all fixed and recorded in its README:**
+
+- `export default` in a Vercel `api/` file is invoked the Node way, `(req, res)`, so `request.url`
+  is only a path and `new URL()` throws. Named `GET`/`POST`/`DELETE` exports receive a standard
+  Web `Request`.
+- `@vercel/blob`'s `get()` returns a plain `ReadableStream`; Vercel's own docs show
+  `stream.text()`, which does not exist on one. The offline tests missed it because they use an
+  in-memory store, so the stream read is now an isolated, tested helper (`lib/stream.js`).
+- **`vercel deploy` attaches the repo's git author, and Vercel blocks a deployment whose author
+  is not a member of the team.** The account owner's git identity differs from the Vercel
+  account's, so the second deploy was blocked ("the commit author doesn't have permission to
+  create deployments for this project") although the first had passed. The receiver is deployed
+  from a copy outside the git repository, which has no author to check. A dashboard redeploy
+  re-runs the same source, so it can change settings but not ship code.
+- A runtime log line printed a request URL containing the shared secret, so the secret was
+  rotated after the first test. The CLI never puts the receiver URL in an error message for the
+  same reason.
+
+**Real runs against eTranslation (same day), on the `books/test` chapter (14,740 characters):**
+
+- **It works end to end.** Submit, delivery through the receiver, decode, write, ledger entry and
+  S3 dashboard row (`provider: etranslation`, `usage.characters`, `cost_usd: 0.0`) all behave as
+  designed, and the resume file is removed once the output is written.
+- **Turnaround was 63 s and 33 s** for that chapter. A full-length book's turnaround is still
+  unknown, so the polling defaults remain guesses, but they look generous at this size.
+- **Markup survived with `document_format: txt`.** Line count (75 in, 75 out), the two-line
+  chapter heading, `[i]kang[/i]`, `[sc]VIII[/sc]` and an `[FN: ...[/FN]]` footnote (with its text
+  translated) all came back intact, and nothing HTML-shaped leaked. **This changed the default
+  from Decision 5's `html` to `txt`**: it is the only format proven with real calls, it needs no
+  conversion code in the path, and it is what the Commission calls its most efficient format. The
+  `html` mode is kept and tested offline, but no real call has exercised it.
+- **`llm_enhanced: true` did nothing on `GEN`, and the reason is the domain.** The account's
+  `GET /getDomains` shows EN to ES as glossary-only on `GEN` and `IPO`, plain on `QE`, and with an
+  LLM variant only on `SPD`, `ECB` and `ECJ` (specialist, institutional domains). A second run
+  with the flag set produced a translation identical to the first except for the two lines whose
+  input had been edited. eTranslation ignores the flag silently, so the provider now reads
+  `getDomains` once per run when `llm_enhanced` is true and warns, naming the domains that do
+  have an LLM variant. It never stops a run.
+- **The LLM-enhanced domain was then tried for real, and is not recommended.** The same chapter
+  on `domain: SPD` with `llm_enhanced: true` (33 s) fixed some of `GEN`'s mistakes (the heading was
+  translated, *asses* became *asnos*, *walls* became *murallas*) but introduced worse ones:
+  *yards* became *astilleros* (shipyards, so the sentence said there were scarcely 500 shipyards
+  *in the tobacco shop*), *pipes* became *tuberías* (plumbing), *Chinamen* became *chinicanos*,
+  *hospitable* became *hospitalizable*. It also **corrupted markup**: `[sc]VIII[/sc]` came back as
+  `VIII [/SC]` (opening tag dropped, closing tag upper-cased). `[i]` and the footnote survived. An
+  LLM-enhanced engine can edit this project's markers, which `txt` mode with plain machine
+  translation did not. **The recommended settings stay `domain: GEN`, `llm_enhanced: false`.**
+- **The resume file's chunk identity now includes domain, LLM mode and document format**, not
+  just the text and language pair (Decision 6 said text only). Found by that experiment: the same
+  chapter re-run after changing domain and LLM mode would otherwise have resumed, or reused the
+  result of, a request submitted with the old settings.
+- **`GEN` supports a glossary** (`EN-ES-GLS`), which makes the glossary feature deferred in "What
+  does NOT ship" feasible on the domain this project uses, without giving up the default.
+
+**Quality, stated plainly.** On the one chapter compared against the earlier DeepL-derived text
+(the `ortho` output, so not a perfectly clean baseline), eTranslation's plain machine
+translation was noticeably more literal: *asses* became *culos*, *bolted* became *atornillada*,
+*walls* became *paredes*, a heading word (*RUMOURS*) was left untranslated, and *five hundred
+yards* became *500 metros* — a silent unit conversion that no later step can catch, since `ortho`
+and `copyedit` never see the English. The account owner's own reading was "OK-ish". The
+accepted trade is a free service in exchange for a closer read of the output; DeepL stays
+selectable. One chapter is a small sample, and the same chapter on the specialist LLM domain `SPD` did
+worse overall (see above), so the trade stays as accepted.
+
+**Overwrite incident, for the record.** `s1b translate` writes to the same path as the input's
+name, so the first real run replaced `books/test/s1b/translated/es/zayagan-chp1.txt`, the raw
+DeepL translation earlier ADRs reused as an `ortho` fixture. The `ortho/` and `copyedit/` outputs
+derived from it were untouched; the raw DeepL text is gone. The run was started on the author's
+instruction without warning of this.
+
+**Verified:**
+
+- The receiver, on the real deployment, against the real private store: a request with no token
+  gets `401`; a write, a read-back, a delete and a second read-back behave as designed.
+- The provider, with real calls: submit, delivery, decode and write in `txt` mode, markup
+  preservation as above, ledger and dashboard recording.
+- Unit tests, all offline: the receiver's handler (10 Node tests) and the provider, markup
+  conversion, resume, LLM-support warning, chunk size, pricing and factory validation (39 Python
+  tests).
+
+**Not verified, and not to be read as settled:**
+
+- **Resume after a real interruption** (it is covered by offline tests only).
+- **A full-length book:** turnaround, and whether one request of that size behaves like a chapter.
+- **The `html` document format** against the real service.
+- **`ECB` and `ECJ`**, the other LLM-enhanced domains (only `SPD` was tried).
+- The "pickup" delivery mode in the error-code list remains undocumented and unasked about.

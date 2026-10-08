@@ -6,6 +6,10 @@ from providers.translation.base import TranslationProvider
 
 
 class DeepLProvider(TranslationProvider):
+    # DeepL accepts up to 128 KB per request; chunk conservatively to stay safe.
+    # (Was a hardcoded constant in engines/translation.py until ADR 022.)
+    max_chars_per_request = 50000
+
     def __init__(self, api_key: str):
         self._translator = deepl.Translator(api_key)
         self.usage = {"characters": 0}

@@ -1,0 +1,10 @@
+{
+  "name": "etranslation-receiver",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Receives eTranslation's asynchronous deliveries for the viable-imprint pipeline (ADR 022).",
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test" },
+  "dependencies": { "@vercel/blob": "^2.3.0" }
+}

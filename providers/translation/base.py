@@ -15,6 +15,18 @@ class TranslationProvider(ABC):
     without this project's own paragraph-chunking (e.g. DeepL's separate
     document-translation endpoint) — a different call shape (file in, file
     out) from `translate()`'s (text in, text out), not a variant of it.
+
+    Three more OPTIONAL capabilities, same convention (ADR 022), read with
+    `getattr()` by `engines/translation.py`:
+
+    - `max_chars_per_request: int` — the largest chunk the provider accepts
+      per `translate()` call. A size limit belongs to the provider that has
+      it, so switching `translation.provider` changes chunking automatically.
+      The engine falls back to 50000 when a provider declares none.
+    - `begin_run(output_dir, input_stem, reference)` / `finish_run()` — for a
+      provider whose `translate()` can outlive the process (eTranslation's is
+      asynchronous): `begin_run` lets it keep resume state next to the output
+      before the first chunk, `finish_run` clears it once the output is written.
     """
 
     @abstractmethod
