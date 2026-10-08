@@ -1,6 +1,6 @@
 # ADR 022 — eTranslation as the Default Translation Provider
 
-**Status:** Proposed (2026-10-08). Design only; no code ships with this ADR.
+**Status:** Implemented (2026-10-08), receiver deployed and verified; the provider is verified against stubbed responses only — real-call validation against eTranslation is still pending. See **Implementation Notes**.
 
 ---
 
@@ -335,7 +335,7 @@ into `config.yaml`).
 
 **Before writing code:**
 
-- [ ] Confirm Vercel Hobby's commercial-use terms (or choose a plan/host that fits)
+- [x] Confirm Vercel Hobby's commercial-use terms (or choose a plan/host that fits)
 - [ ] Optional: ask the DGT advisory team whether "pickup" delivery exists for REST v2 and this
       account (see Alternatives)
 - [ ] `GET /getDomains` with the account's credentials: confirm `EN-ES` is available on `GEN`, and
@@ -343,21 +343,21 @@ into `config.yaml`).
 
 **Receiver (`receivers/etranslation-vercel/`):**
 
-- [ ] `api/etranslation.js`: POST (delivery/success/failure), GET (status/result), DELETE; secret
+- [x] `api/etranslation.js`: POST (delivery/success/failure), GET (status/result), DELETE; secret
       check in constant time; User-Agent filter on POSTs; idempotent overwrite storage
-- [ ] `package.json`, `README.md` with deploy steps
-- [ ] Deploy; confirm with `curl` that a POST without the secret gets `401` and a POST/GET/DELETE
+- [x] `package.json`, `README.md` with deploy steps
+- [x] Deploy; confirm with `curl` that a POST without the secret gets `401` and a POST/GET/DELETE
       round trip with it works
 
 **Pipeline:**
 
-- [ ] `providers/translation/etranslation.py`: status check, HTML conversion both ways, submit,
+- [x] `providers/translation/etranslation.py`: status check, HTML conversion both ways, submit,
       poll, delete, error-code messages, `usage`, sidecar resume (Decision 6)
-- [ ] `max_chars_per_request` on both providers; `engines/translation.py` reads it (Decision 4)
-- [ ] `get_translation_provider()` `etranslation` branch with key/URL checks
-- [ ] `lib/metrics.py`: per-provider pricing with the DeepL-only legacy fallback (Decision 5)
-- [ ] `config.example.yaml`, `.env.example`, README, cheat sheet
-- [ ] Stubbed-`httpx` unit tests (stdlib `unittest`, same pattern as `tests/test_openai_chat_zai.py`):
+- [x] `max_chars_per_request` on both providers; `engines/translation.py` reads it (Decision 4)
+- [x] `get_translation_provider()` `etranslation` branch with key/URL checks
+- [x] `lib/metrics.py`: per-provider pricing with the DeepL-only legacy fallback (Decision 5)
+- [x] `config.example.yaml`, `.env.example`, README, cheat sheet
+- [x] Stubbed-`httpx` unit tests (stdlib `unittest`, same pattern as `tests/test_openai_chat_zai.py`):
       HTML round trip of every markup case in Decision 1's table; submit payload shape; polling
       through `pending` → delivery and → failure; error-code messages; sidecar resume / stale-hash
       resubmit; per-provider pricing including the legacy fallback
@@ -372,3 +372,71 @@ into `config.yaml`).
 - [ ] Quality side by side: the same chapter through eTranslation (`llm_enhanced: false`, then
       `true`) against DeepL's existing output in `books/test`, judged by the account owner
 - [ ] Confirm the S3 dashboard shows `provider: etranslation` and `cost_usd: 0.0`
+
+---
+
+## Implementation Notes (2026-10-08)
+
+The Decisions above are kept as designed. What changed, what was found, and what was and was
+not verified:
+
+**Changes to the design, all small:**
+
+- **Vercel Pro, not Hobby.** The licensing question in Decision 2 was read against Vercel's
+  fair-use guidelines, which restrict Hobby to non-commercial personal use ("financial gain of
+  anyone involved in any part of the production"). The account owner moved the team to Pro.
+- **A private Blob store was confirmed available**, so the "private if the account offers it"
+  hedge became a plain requirement. The function authenticates through OIDC once the store is
+  connected to the project; no Blob token exists anywhere in this design. Private stores need
+  `@vercel/blob` >= 2.3 and Vercel CLI >= 50.20.
+- **The receiver logs an unexpected `User-Agent` instead of rejecting it** (Decision 2 said
+  "checked on POSTs as a cheap filter"). Rejecting on a header would turn any change on
+  eTranslation's side into a silent loss of every translation, for no security gain: the shared
+  secret is the actual gate.
+- **The sidecar also stores each received translation, not just request ids** (Decision 6).
+  Without that, a crash between deleting a result from the receiver and writing the output file
+  would lose a finished chunk with no way to recover it. A matching entry holding a translation is
+  returned with no network call at all.
+- **`llm_enhanced` is true / false / null**, not just a boolean (Decision 5). `null` omits the
+  `llm` block entirely, for an account that gets `LLM_NOT_ALLOWED` even when `enabled` is false.
+  Whether that can happen is unknown; the cost of allowing for it is one config value.
+- **Two optional hooks, `begin_run()` and `finish_run()`,** carry the sidecar's lifecycle between
+  `engines/translation.py` and the provider, alongside `max_chars_per_request` (all three
+  documented in `providers/translation/base.py`, read with `getattr()`, same convention as
+  `translate_document()`). Decision 6 left the plumbing unspecified.
+
+**Found while deploying the receiver, all fixed and recorded in its README:**
+
+- `export default` in a Vercel `api/` file is invoked the Node way, `(req, res)`, so `request.url`
+  is only a path and `new URL()` throws. Named `GET`/`POST`/`DELETE` exports receive a standard
+  Web `Request`.
+- `@vercel/blob`'s `get()` returns a plain `ReadableStream`; Vercel's own docs show
+  `stream.text()`, which does not exist on one. The offline tests missed it because they use an
+  in-memory store, so the stream read is now an isolated, tested helper (`lib/stream.js`).
+- **`vercel deploy` attaches the repo's git author, and Vercel blocks a deployment whose author
+  is not a member of the team.** The account owner's git identity differs from the Vercel
+  account's, so the second deploy was blocked ("the commit author doesn't have permission to
+  create deployments for this project") although the first had passed. The receiver is deployed
+  from a copy outside the git repository, which has no author to check. A dashboard redeploy
+  re-runs the same source, so it can change settings but not ship code.
+- A runtime log line printed a request URL containing the shared secret, so the secret was
+  rotated after the first test. The CLI never puts the receiver URL in an error message for the
+  same reason.
+
+**Verified:**
+
+- The receiver, on the real deployment, against the real private store: a request with no token
+  gets `401`; a write, a read-back, a delete and a second read-back behave as designed.
+- Unit tests, all offline: the receiver's handler (10 Node tests) and the provider, markup
+  conversion, resume, chunk size, pricing and factory validation (33 Python tests).
+
+**Not verified, and not to be read as settled:**
+
+- **Any real call to eTranslation.** The provider has only been run against stubbed responses
+  built from the published OpenAPI spec. Every real-call item in the checklist is open: that the
+  engine preserves `[i]`/`[sc]`, `<br/>` and footnote text through an actual translation, the
+  real turnaround time (30 s polling and a 120 minute timeout are guesses), resume after a real
+  interruption, and the quality of the Spanish on this material.
+- `GET /getDomains` for this account (that `EN-ES` exists on `GEN`, and whether an LLM-suffixed
+  pair is listed).
+- The "pickup" delivery mode in the error-code list remains undocumented and unasked about.

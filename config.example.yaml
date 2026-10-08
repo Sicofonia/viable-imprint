@@ -131,13 +131,37 @@ llm:
   #   max_output_tokens: 65536
 
 translation:
-  provider: deepl
+  provider: etranslation          # or: deepl
   source_lang: EN
   target_lang: ES
-  # Optional, same caveat as llm.pricing above — DeepL Pro API pricing is
-  # per-character; confirm your own plan's current rate before trusting it.
-  pricing:
-    per_million_characters: 20.00
+
+  # ADR 022 — European Commission eTranslation. Needs three keys in .env
+  # (ETRANSLATION_APP_NAME, ETRANSLATION_PASSWORD, ETRANSLATION_RECEIVER_SECRET)
+  # and the receiver deployed first: receivers/etranslation-vercel/README.md.
+  etranslation:
+    # The deployed receiver's URL. https, no query string.
+    receiver_url: https://your-project.vercel.app/api/etranslation
+    domain: GEN                   # "General text"; the Commission's GET /getDomains lists the rest
+    document_format: html         # html | txt — html carries [i]/[sc] as inline tags; txt is sent as-is
+    # true / false / null. false is sent explicitly so a change to the account's
+    # server-side default cannot silently change the output; null omits the llm
+    # block entirely (needed if the account is not allowed to use LLM enhancement).
+    llm_enhanced: false
+    # Both are guesses, not measured turnaround times — revisit after a real book.
+    poll_interval_seconds: 30
+    timeout_minutes: 120
+    # Free for eligible SMEs: a real figure, not a shadow price.
+    pricing:
+      per_million_characters: 0.0
+
+  # Pricing lives under each provider, so switching providers cannot leave
+  # another provider's rate on the dashboard (ADR 022, Decision 5). Optional,
+  # same caveat as llm.pricing above — DeepL's API pricing is per character;
+  # confirm your own plan's current rate before trusting it. A legacy
+  # top-level `translation.pricing:` block is still read, but only for deepl.
+  deepl:
+    pricing:
+      per_million_characters: 20.00
 
 s3:
   # Optional — System 3's `s3 dashboard` (ADR 010) uses this to flag
