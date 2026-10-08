@@ -44,9 +44,15 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
         translate_document(input_file, output_file, source_lang, target_lang)
     else:
         raw_text = input_file.read_text(encoding="utf-8")
-        # DeepL accepts up to 128 KB per request; chunk conservatively to stay safe
-        chunks = chunk_by_paragraphs(raw_text, max_chars=50000)
+        # A request-size limit belongs to the provider that has it (ADR 022,
+        # Decision 4); 50000 is only the fallback for one that declares none.
+        chunks = chunk_by_paragraphs(raw_text, max_chars=getattr(translator, "max_chars_per_request", 50000))
         total = len(chunks)
+
+        # Optional hooks for a provider whose translate() can outlive this process.
+        begin_run = getattr(translator, "begin_run", None)
+        if begin_run is not None:
+            begin_run(output_dir, input_file.stem, f"{root.name}/{input_file.stem}")
 
         parts = []
         for i, chunk in enumerate(chunks, 1):
@@ -54,6 +60,10 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
             parts.append(translator.translate(chunk, source_lang, target_lang))
 
         output_file.write_text("\n\n".join(parts), encoding="utf-8")
+
+        finish_run = getattr(translator, "finish_run", None)
+        if finish_run is not None:
+            finish_run()
 
     manifest.update(
         root,

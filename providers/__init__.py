@@ -89,6 +89,42 @@ def get_llm_provider(config: dict) -> LLMProvider:
 
 def get_translation_provider(config: dict) -> TranslationProvider:
     name = config["translation"]["provider"]
+    if name == "etranslation":
+        keys = ("ETRANSLATION_APP_NAME", "ETRANSLATION_PASSWORD", "ETRANSLATION_RECEIVER_SECRET")
+        missing = [k for k in keys if not os.environ.get(k)]
+        if missing:
+            raise click.ClickException(f"{', '.join(missing)} not set. Add to your .env file.")
+        settings = config["translation"].get("etranslation") or {}
+        receiver_url = settings.get("receiver_url")
+        if not isinstance(receiver_url, str) or not receiver_url.startswith("https://") or "?" in receiver_url:
+            raise click.ClickException(
+                "translation.etranslation.receiver_url must be set in config.yaml to the deployed "
+                "receiver's https URL with no query string "
+                "(e.g. https://<project>.vercel.app/api/etranslation) — see receivers/etranslation-vercel/README.md."
+            )
+        document_format = settings.get("document_format", "html")
+        if document_format not in ("html", "txt"):
+            raise click.ClickException("translation.etranslation.document_format must be 'html' or 'txt'.")
+        llm_enhanced = settings.get("llm_enhanced", False)
+        if llm_enhanced is not None and not isinstance(llm_enhanced, bool):
+            raise click.ClickException("translation.etranslation.llm_enhanced must be true, false, or null (omit).")
+        numbers = {}
+        for key, default in (("poll_interval_seconds", 30.0), ("timeout_minutes", 120.0)):
+            value = settings.get(key, default)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise click.ClickException(f"translation.etranslation.{key} must be a positive number.")
+            numbers[key] = float(value)
+        from providers.translation.etranslation import ETranslationProvider
+        return ETranslationProvider(
+            app_name=os.environ["ETRANSLATION_APP_NAME"],
+            password=os.environ["ETRANSLATION_PASSWORD"],
+            receiver_url=receiver_url,
+            receiver_secret=os.environ["ETRANSLATION_RECEIVER_SECRET"],
+            domain=settings.get("domain", "GEN"),
+            document_format=document_format,
+            llm_enhanced=llm_enhanced,
+            **numbers,
+        )
     if name == "deepl":
         api_key = os.environ.get("DEEPL_API_KEY")
         if not api_key:
@@ -97,4 +133,4 @@ def get_translation_provider(config: dict) -> TranslationProvider:
             )
         from providers.translation.deepl import DeepLProvider
         return DeepLProvider(api_key=api_key)
-    raise ValueError(f"Unknown translation provider: {name!r}. Supported: deepl")
+    raise ValueError(f"Unknown translation provider: {name!r}. Supported: etranslation, deepl")
