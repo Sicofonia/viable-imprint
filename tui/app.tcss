@@ -203,3 +203,12 @@ BookScreen #task-panel {
     width: 35%;
     padding: 0 2;
 }
+
+BookScreen #task-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+BookScreen #task-hint {
+    padding: 0;
+}

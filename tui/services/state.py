@@ -96,3 +96,14 @@ def describe_task(row: dict) -> TaskRow:
 
 def book_tasks(root: Path) -> list:
     return [describe_task(r) for r in orchestrator.book_status(root)]
+
+
+def task_input(root: Path, row: TaskRow):
+    """(input path, reason): the input `s2 run` would give this task (see `orchestrator.resolve_input`)."""
+    return orchestrator.resolve_input(root, row.key)
+
+
+def stale_consequences(root: Path, row: TaskRow) -> list:
+    """Task keys that are done now and would be marked stale if `row` ran again (ADR 009)."""
+    ledger = manifest.load(root).get("tasks", {})
+    return [key for key in orchestrator.downstream_of(row.key) if ledger.get(key, {}).get("status") == "done"]
