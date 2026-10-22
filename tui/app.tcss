@@ -212,3 +212,12 @@ BookScreen #task-actions {
 BookScreen #task-hint {
     padding: 0;
 }
+
+BookScreen #pipeline-title {
+    text-style: bold;
+    margin-top: 2;
+}
+
+BookScreen #pipeline-hint {
+    padding: 0;
+}

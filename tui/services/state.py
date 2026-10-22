@@ -107,3 +107,8 @@ def stale_consequences(root: Path, row: TaskRow) -> list:
     """Task keys that are done now and would be marked stale if `row` ran again (ADR 009)."""
     ledger = manifest.load(root).get("tasks", {})
     return [key for key in orchestrator.downstream_of(row.key) if ledger.get(key, {}).get("status") == "done"]
+
+
+def ready_task_keys(root: Path, only: str = None) -> list:
+    """Keys of the tasks `s2 run` would start right now (failed ones included: they are retried)."""
+    return [f"{node['system']}.{node['task']['name']}" for node, _ in orchestrator.ready_tasks(root, only=only)]

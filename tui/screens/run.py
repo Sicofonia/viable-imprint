@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label, RichLog, Static
 
 from tui.services.files import open_path, parse_saved
+from tui.services.output import chain_summary
 from tui.services.session import RunRequest, RunSession
 from tui.widgets.command_hint import CommandHint
 
@@ -119,7 +120,11 @@ class RunScreen(ModalScreen):
 
     def _show_result(self, result) -> None:
         self.session.unsubscribe(self._on_session_event)
-        self.query_one("#run-summary", Static).update(summarize(result))
+        text = summarize(result)
+        chain = chain_summary(self.session.lines)
+        if chain is not None:
+            text += "\n" + chain.sentence()
+        self.query_one("#run-summary", Static).update(text)
         self._show_state("done")
 
     # -- actions --------------------------------------------------------

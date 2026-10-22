@@ -6,7 +6,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import DataTable, Static
+from textual.widgets import Checkbox, DataTable, Select, Static
 
 from tui.screens.base import BaseScreen
 from tui.services import commands, estimate, state
@@ -17,6 +17,7 @@ from tui.widgets.param_form import ParamForm
 from tui.widgets.run_button import RunButton
 
 MARKS = {"done": "[x]", "stale": "[~]", "ready": "[ ]", "blocked": "[ ]", "failed": "[!]"}
+PIPELINE_SCOPES = [("All ready tasks", "all"), ("Only System 1B (editorial)", "s1b"), ("Only System 1D (marketing)", "s1d")]
 
 
 class BookScreen(BaseScreen):
@@ -43,6 +44,11 @@ class BookScreen(BaseScreen):
                 yield CommandHint(id="task-hint")
                 with Horizontal(id="task-actions"):
                     yield RunButton("Run task", id="run-task")
+                yield Static("Run the pipeline", id="pipeline-title", markup=False)
+                yield Select(PIPELINE_SCOPES, allow_blank=False, value="all", id="pipeline-scope")
+                yield Checkbox("One step only (run a single ready task and stop)", id="pipeline-step")
+                yield CommandHint(id="pipeline-hint")
+                yield RunButton("Run pipeline", id="run-pipeline")
 
     def on_mount(self) -> None:
         self.system_labels = {path[0]: label for path, label in group_helps(self.app.root).items() if len(path) == 1}
@@ -81,6 +87,7 @@ class BookScreen(BaseScreen):
             f"{f', {info.failed} failed' if info.failed else ''}{f', {info.stale} stale' if info.stale else ''}"
             f"   {self.root}")
         self.call_later(self._show_selected)
+        self._update_pipeline()
 
     def selected(self):
         """The `state.TaskRow` under the cursor, or None on a system heading."""
@@ -173,3 +180,36 @@ class BookScreen(BaseScreen):
         except Exception:  # noqa: BLE001 - an estimate must never stop the operator from running
             guess = None
         self.app.begin_run(RunRequest(f"{row.system} {row.name}", argv, estimate=guess, warnings=warnings))
+
+    # -- running the pipeline -------------------------------------------------------
+
+    def _pipeline_values(self) -> dict:
+        scope = self.query_one("#pipeline-scope", Select).value
+        return {"book_slug": self.slug, "only": None if scope == "all" else scope,
+                "step": self.query_one("#pipeline-step", Checkbox).value}
+
+    def _s2_run_spec(self) -> CommandSpec:
+        return next(s for s in build_model(self.app.root) if s.path == ["s2", "run"])
+
+    def _update_pipeline(self) -> None:
+        values = self._pipeline_values()
+        self.query_one("#pipeline-hint", CommandHint).show_argv(
+            commands.argv_for(self.app.ctx, self._s2_run_spec(), values))
+        self.query_one("#run-pipeline", RunButton).blocked_reason = (
+            None if state.ready_task_keys(self.root, values["only"]) else "Nothing is ready to run in this scope")
+
+    @on(Select.Changed, "#pipeline-scope")
+    @on(Checkbox.Changed, "#pipeline-step")
+    def _pipeline_options_changed(self) -> None:
+        self._update_pipeline()
+
+    @on(RunButton.Pressed, "#run-pipeline")
+    def _run_pipeline(self) -> None:
+        values = self._pipeline_values()
+        argv = commands.argv_for(self.app.ctx, self._s2_run_spec(), values)
+        try:
+            guess = estimate.estimate_book_run(self.app.ctx, self.slug, only=values["only"], step=values["step"])
+        except Exception:  # noqa: BLE001 - an estimate must never stop the operator from running
+            guess = None
+        title = f"s2 run {self.slug}" + (f" --only {values['only']}" if values["only"] else "")             + (" --step" if values["step"] else "")
+        self.app.begin_run(RunRequest(title, argv, estimate=guess))
