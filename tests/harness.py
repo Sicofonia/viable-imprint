@@ -27,6 +27,8 @@ from unittest import mock
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))  # `lib`, `providers` ... importable whoever imports the harness
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
 PIPELINE_SCRIPT = REPO_ROOT / "pipeline.py"
 EXAMPLE_LAUNCHER = REPO_ROOT / "tests" / "example_pipeline.py"

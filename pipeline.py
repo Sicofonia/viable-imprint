@@ -24,7 +24,6 @@ at the book root, since it's shared across every system.
 """
 import re
 import sys
-from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,7 +32,7 @@ import yaml
 from dotenv import load_dotenv
 
 import pdf_bleed_tool
-from lib import candidates, dashboard, homeostat, manifest, orchestrator, paths, policy_check
+from lib import candidates, dashboard, formatting, homeostat, manifest, orchestrator, paths, policy_check
 from lib import task_loader
 from lib.task_loader import build_system_group
 
@@ -429,45 +428,6 @@ cli.add_command(s2)
 # (it was never task-shaped to begin with).
 # ---------------------------------------------------------------------------
 
-def _format_duration(seconds: float) -> str:
-    seconds = int(round(seconds or 0))
-    minutes, secs = divmod(seconds, 60)
-    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
-
-
-def _format_cost(cost_usd) -> str:
-    if cost_usd is None:
-        return "-"
-    # Per-task costs for short texts are routinely sub-cent — 3 decimals
-    # would silently round them to "$0.000", hiding real signal.
-    return f"${cost_usd:.6f}" if cost_usd < 0.01 else f"${cost_usd:.3f}"
-
-
-def _format_margin(margin_usd) -> str:
-    if margin_usd is None:
-        return "-"
-    sign = "-" if margin_usd < 0 else ""
-    return f"{sign}${abs(margin_usd):.2f}"
-
-
-def _format_revenue(revenue_by_currency: dict) -> str:
-    if not revenue_by_currency:
-        return "-"
-    # Grouped by currency, not summed across them (ADR 011, point 6) — no
-    # FX conversion is attempted anywhere in this project.
-    return ", ".join(f"{amount:.2f} {currency}" for currency, amount in sorted(revenue_by_currency.items()))
-
-
-def _format_span(start_iso: str, end_iso: str) -> str:
-    if not start_iso:
-        return "no runs yet"
-    start = date.fromisoformat(start_iso[:10])
-    end = date.fromisoformat(end_iso[:10])
-    days = (end - start).days
-    label = "in progress" if days == 0 else f"{days} day{'s' if days != 1 else ''}"
-    return f"{start} -> {end} ({label})"
-
-
 _s3_group = build_system_group("s3", "System 3 — Performance Monitoring (metrics dashboard)")
 
 
@@ -504,24 +464,24 @@ def s3_dashboard(ctx, book_slug):
             else:
                 usage_str = "-"
             label = key if entry["status"] == "done" else f"{key} (stale)"
-            duration_str = _format_duration(entry.get("duration_seconds"))
+            duration_str = formatting.format_duration(entry.get("duration_seconds"))
             if key in duration_flags:
                 duration_str += " !"
             click.echo(f"{label:<24}  {duration_str:>10}  "
-                       f"{provider_model:<32}  {usage_str:<22}  {_format_cost(entry.get('cost_usd')):>10}")
+                       f"{provider_model:<32}  {usage_str:<22}  {formatting.format_cost(entry.get('cost_usd')):>10}")
 
         cost_note = "" if summary["cost_usd"] is not None else " (cost omitted — no pricing configured, or no billable tasks run yet)"
         click.echo(f"\nTotal: {summary['tasks_done']}/{summary['tasks_total']} tasks done, "
-                   f"{_format_duration(summary['duration_seconds'])} compute time, "
-                   f"{_format_cost(summary['cost_usd'])} API cost{cost_note}")
-        click.echo(f"In-pipeline span: {_format_span(summary['span_start'], summary['span_end'])}")
+                   f"{formatting.format_duration(summary['duration_seconds'])} compute time, "
+                   f"{formatting.format_cost(summary['cost_usd'])} API cost{cost_note}")
+        click.echo(f"In-pipeline span: {formatting.format_span(summary['span_start'], summary['span_end'])}")
         if summary["revenue_by_currency"]:
-            click.echo(f"Revenue: {_format_revenue(summary['revenue_by_currency'])}")
+            click.echo(f"Revenue: {formatting.format_revenue(summary['revenue_by_currency'])}")
             click.echo(f"Reported margin (revenue minus tracked API cost only): "
-                       f"{_format_margin(summary['reported_margin_usd'])}")
+                       f"{formatting.format_margin(summary['reported_margin_usd'])}")
         for key, (value, avg, mult) in sorted(duration_flags.items()):
-            click.echo(f"\nFlagged: {key} — {_format_duration(value)} is {mult:.1f}x the portfolio "
-                       f"average for this task ({_format_duration(avg)})")
+            click.echo(f"\nFlagged: {key} — {formatting.format_duration(value)} is {mult:.1f}x the portfolio "
+                       f"average for this task ({formatting.format_duration(avg)})")
         return
 
     summaries = dashboard.portfolio_summary(books_dir)
@@ -536,14 +496,14 @@ def s3_dashboard(ctx, book_slug):
                f"{'Revenue':<16}  {'Margin (API)':<12}  {'In-pipeline span'}")
     for s in summaries:
         done_str = f"{s['tasks_done']}/{s['tasks_total']}"
-        cost_str = _format_cost(s["cost_usd"])
+        cost_str = formatting.format_cost(s["cost_usd"])
         if s["slug"] in flags["cost"]:
             cost_str += " !"
         click.echo(f"{s['slug']:<20}  {done_str:<12}  {cost_str:<14}  "
-                   f"{_format_duration(s['duration_seconds']):<14}  "
-                   f"{_format_revenue(s['revenue_by_currency']):<16}  "
-                   f"{_format_margin(s['reported_margin_usd']):<12}  "
-                   f"{_format_span(s['span_start'], s['span_end'])}")
+                   f"{formatting.format_duration(s['duration_seconds']):<14}  "
+                   f"{formatting.format_revenue(s['revenue_by_currency']):<16}  "
+                   f"{formatting.format_margin(s['reported_margin_usd']):<12}  "
+                   f"{formatting.format_span(s['span_start'], s['span_end'])}")
 
     total_done = sum(s["tasks_done"] for s in summaries)
     known_costs = [s["cost_usd"] for s in summaries if s["cost_usd"] is not None]
@@ -552,12 +512,12 @@ def s3_dashboard(ctx, book_slug):
     avg_cost = (total_cost / len(known_costs)) if known_costs else None
     avg_duration = total_duration / len(summaries) if summaries else 0
 
-    click.echo(f"\nTotals: {_format_cost(total_cost)} API cost, {total_done} tasks completed, "
-               f"avg {_format_cost(avg_cost)}/title, avg compute time {_format_duration(avg_duration)}/title")
+    click.echo(f"\nTotals: {formatting.format_cost(total_cost)} API cost, {total_done} tasks completed, "
+               f"avg {formatting.format_cost(avg_cost)}/title, avg compute time {formatting.format_duration(avg_duration)}/title")
 
     for slug, (value, avg, mult) in sorted(flags["cost"].items()):
-        click.echo(f"\nFlagged: {slug} — API cost {_format_cost(value)} is {mult:.1f}x "
-                   f"the portfolio average ({_format_cost(avg)})")
+        click.echo(f"\nFlagged: {slug} — API cost {formatting.format_cost(value)} is {mult:.1f}x "
+                   f"the portfolio average ({formatting.format_cost(avg)})")
 
 
 # Deliberately re-registers "sales-ingest" on `_s3_group`, overriding the

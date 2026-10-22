@@ -1,0 +1,11 @@
+Portfolio: 4 books
+
+Book                  Tasks done    API cost        Compute time    Revenue           Margin (API)  In-pipeline span
+book-a                2/13          $0.010          15s             -                 -             2026-09-01 -> 2026-09-01 (in progress)
+book-b                2/13          $0.010          12s             -                 -             2026-09-02 -> 2026-09-02 (in progress)
+book-c                1/13          $0.010          10s             20.00 EUR         -             2026-09-03 -> 2026-09-03 (in progress)
+book-d                2/13          $0.100 !        1m 45s          48.60 USD         $48.50        2026-09-04 -> 2026-09-04 (in progress)
+
+Totals: $0.130 API cost, 7 tasks completed, avg $0.033/title, avg compute time 36s/title
+
+Flagged: book-d — API cost $0.100 is 10.0x the portfolio average ($0.010)

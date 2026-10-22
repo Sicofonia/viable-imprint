@@ -1,0 +1,12 @@
+Book: book-d
+
+Task                        Duration  Provider/Model                    Usage                         Cost
+s1b.cleanup                 1m 40s !  fake / fake-1                     1,500 tokens                $0.100
+s1b.translate                     5s  fake                              5,000 characters         $0.000100
+
+Total: 2/13 tasks done, 1m 45s compute time, $0.100 API cost
+In-pipeline span: 2026-09-04 -> 2026-09-04 (in progress)
+Revenue: 48.60 USD
+Reported margin (revenue minus tracked API cost only): $48.50
+
+Flagged: s1b.cleanup — 1m 40s is 10.0x the portfolio average for this task (10s)
