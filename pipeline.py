@@ -454,35 +454,23 @@ def s3_dashboard(ctx, book_slug):
         for key, entry in sorted(summary["tasks"].items()):
             if entry.get("status") not in ("done", "stale"):
                 continue
-            provider_model = entry.get("model") or entry.get("provider") or "-"
-            if entry.get("model") and entry.get("provider"):
-                provider_model = f"{entry['provider']} / {entry['model']}"
-            usage = entry.get("usage")
-            if usage and "total_tokens" in usage:
-                usage_str = f"{usage['total_tokens']:,} tokens"
-            elif usage and "characters" in usage:
-                usage_str = f"{usage['characters']:,} characters"
-            else:
-                usage_str = "-"
-            label = key if entry["status"] == "done" else f"{key} (stale)"
+            provider_model = formatting.format_provider_model(entry)
+            usage_str = formatting.format_usage(entry.get("usage"))
+            label = formatting.task_label(key, entry)
             duration_str = formatting.format_duration(entry.get("duration_seconds"))
             if key in duration_flags:
                 duration_str += " !"
             click.echo(f"{label:<24}  {duration_str:>10}  "
                        f"{provider_model:<32}  {usage_str:<22}  {formatting.format_cost(entry.get('cost_usd')):>10}")
 
-        cost_note = "" if summary["cost_usd"] is not None else " (cost omitted — no pricing configured, or no billable tasks run yet)"
-        click.echo(f"\nTotal: {summary['tasks_done']}/{summary['tasks_total']} tasks done, "
-                   f"{formatting.format_duration(summary['duration_seconds'])} compute time, "
-                   f"{formatting.format_cost(summary['cost_usd'])} API cost{cost_note}")
+        click.echo(f"\n{formatting.book_total_line(summary)}")
         click.echo(f"In-pipeline span: {formatting.format_span(summary['span_start'], summary['span_end'])}")
         if summary["revenue_by_currency"]:
             click.echo(f"Revenue: {formatting.format_revenue(summary['revenue_by_currency'])}")
-            click.echo(f"Reported margin (revenue minus tracked API cost only): "
+            click.echo(f"{formatting.MARGIN_EXPLANATION}: "
                        f"{formatting.format_margin(summary['reported_margin_usd'])}")
         for key, (value, avg, mult) in sorted(duration_flags.items()):
-            click.echo(f"\nFlagged: {key} — {formatting.format_duration(value)} is {mult:.1f}x the portfolio "
-                       f"average for this task ({formatting.format_duration(avg)})")
+            click.echo(f"\n{formatting.duration_flag_line(key, value, avg, mult)}")
         return
 
     summaries = dashboard.portfolio_summary(books_dir)
@@ -506,19 +494,10 @@ def s3_dashboard(ctx, book_slug):
                    f"{formatting.format_margin(s['reported_margin_usd']):<12}  "
                    f"{formatting.format_span(s['span_start'], s['span_end'])}")
 
-    total_done = sum(s["tasks_done"] for s in summaries)
-    known_costs = [s["cost_usd"] for s in summaries if s["cost_usd"] is not None]
-    total_cost = sum(known_costs) if known_costs else None
-    total_duration = sum(s["duration_seconds"] for s in summaries)
-    avg_cost = (total_cost / len(known_costs)) if known_costs else None
-    avg_duration = total_duration / len(summaries) if summaries else 0
-
-    click.echo(f"\nTotals: {formatting.format_cost(total_cost)} API cost, {total_done} tasks completed, "
-               f"avg {formatting.format_cost(avg_cost)}/title, avg compute time {formatting.format_duration(avg_duration)}/title")
+    click.echo(f"\n{formatting.portfolio_totals_line(summaries)}")
 
     for slug, (value, avg, mult) in sorted(flags["cost"].items()):
-        click.echo(f"\nFlagged: {slug} — API cost {formatting.format_cost(value)} is {mult:.1f}x "
-                   f"the portfolio average ({formatting.format_cost(avg)})")
+        click.echo(f"\n{formatting.cost_flag_line(slug, value, avg, mult)}")
 
 
 # Deliberately re-registers "sales-ingest" on `_s3_group`, overriding the
