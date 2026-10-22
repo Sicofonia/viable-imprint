@@ -1,6 +1,6 @@
 # ADR 023 — Terminal UI (Textual) Over the Existing Pipeline
 
-**Status:** Approved. Written as an ordered task list for Claude Code; every task states its scope, its tests, and when it is done.
+**Status:** Approved. Implemented through T8.1 (2026-10-22). **T8.2 (live smoke script) and T8.3 (documentation, final status) are not done**: T8.2 uses real API keys and is left for the operator to run and record. Written as an ordered task list for Claude Code; every task states its scope, its tests, and when it is done.
 
 ---
 
