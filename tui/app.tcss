@@ -260,3 +260,51 @@ PrintPrepScreen .pp-actions {
 PrintPrepScreen .pp-actions Button {
     margin-right: 1;
 }
+
+PerformanceScreen #portfolio {
+    height: auto;
+    max-height: 12;
+}
+
+PerformanceScreen #book-tasks {
+    height: auto;
+    max-height: 12;
+}
+
+PerformanceScreen #portfolio-flags {
+    color: $warning;
+}
+
+PerformanceScreen #margin-note {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+PerformanceScreen #book-title, PerformanceScreen #sales-title {
+    text-style: bold;
+    margin-top: 1;
+}
+
+PerformanceScreen #sales-help {
+    color: $text-muted;
+}
+
+PerformanceScreen #ingest-csv-row {
+    height: auto;
+}
+
+PerformanceScreen #ingest-csv-row Input {
+    width: 1fr;
+}
+
+PerformanceScreen #ingest-actions {
+    height: auto;
+}
+
+PerformanceScreen #ingest-actions Button {
+    margin-right: 1;
+}
+
+PerformanceScreen #ingest-receipt {
+    margin-top: 1;
+}
