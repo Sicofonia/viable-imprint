@@ -185,3 +185,21 @@ NewBookScreen {
 #nb-buttons Button {
     margin-left: 1;
 }
+
+BookScreen #book-title {
+    padding: 0 2;
+    text-style: bold;
+}
+
+BookScreen #book-main {
+    height: 1fr;
+}
+
+BookScreen #tasks {
+    width: 65%;
+}
+
+BookScreen #task-panel {
+    width: 35%;
+    padding: 0 2;
+}

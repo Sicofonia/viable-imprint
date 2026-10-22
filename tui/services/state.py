@@ -55,3 +55,44 @@ def list_books(ctx: Context) -> list:
 
 def format_activity(iso: str) -> str:
     return iso[:16].replace("T", " ") if iso else "-"
+
+
+# -- one book's tasks (T2.2) ---------------------------------------------------
+
+@dataclass
+class TaskRow:
+    system: str
+    name: str
+    status: str                 # done | stale | ready | blocked | failed
+    detail: str                 # one line: the output, the reason, the error ...
+    output: str = None          # the ledger's output path, relative to the book
+    edited: bool = False        # output edited by hand since the task ran (informational)
+    runnable: bool = False      # can be started now (re-running a done task is allowed, with a warning)
+    invalidated_by: str = None
+
+    @property
+    def key(self) -> str:
+        return f"{self.system}.{self.name}"
+
+
+def describe_task(row: dict) -> TaskRow:
+    """One `orchestrator.book_status` row as the screen shows it. The words match `s2 status`."""
+    status = row["status"]
+    edited = " (edited since run)" if row.get("edited_since_run") else ""
+    common = dict(system=row["system"], name=row["name"], status=status, edited=bool(row.get("edited_since_run")))
+    if status == "done":
+        return TaskRow(detail=f"{row['output']}{edited}", output=row["output"], runnable=True, **common)
+    if status == "stale":
+        ready = row["ready_to_rerun"]
+        return TaskRow(detail=f"invalidated by {row['invalidated_by']} - {'ready to rerun' if ready else 'blocked'}{edited}",
+                       output=row.get("output"), runnable=ready, invalidated_by=row["invalidated_by"], **common)
+    if status == "failed":
+        ready = row["ready_to_retry"]
+        return TaskRow(detail=f"{row['error']} - {'ready to retry' if ready else 'blocked'}", runnable=ready, **common)
+    if status == "ready":
+        return TaskRow(detail="ready", runnable=True, **common)
+    return TaskRow(detail=row["reason"], runnable=False, **common)
+
+
+def book_tasks(root: Path) -> list:
+    return [describe_task(r) for r in orchestrator.book_status(root)]

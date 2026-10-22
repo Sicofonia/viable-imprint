@@ -88,15 +88,18 @@ class PipelineApp(App):
         title = self.session.request.title
         self.notify(f"{title}: {summarize(payload)}",
                     severity="information" if payload.returncode == 0 and not payload.cancelled else "warning")
+        # Screens that are already showing re-read their state first; only then does the
+        # request's own follow-up run, because it may push a new screen (a new book opens
+        # its book screen) that is not mounted yet and has nothing to refresh.
+        for screen in list(self.screen_stack):
+            handler = getattr(screen, "run_finished", None)
+            if handler is not None and screen.is_mounted:
+                handler(payload)
         if self.session.request.on_done is not None:
             try:
                 self.session.request.on_done(payload)
             except Exception as exc:  # noqa: BLE001 - a follow-up step failing must not break the event loop
                 self.notify(f"{title}: the follow-up step failed: {exc}", severity="error")
-        for screen in list(self.screen_stack):
-            handler = getattr(screen, "run_finished", None)
-            if handler is not None:
-                handler(payload)
 
     def open_book(self, slug: str) -> None:
         from tui.screens.book import BookScreen  # imported on use: screens import the app's helpers
