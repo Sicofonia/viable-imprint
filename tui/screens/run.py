@@ -11,7 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label, RichLog, Static
 
 from tui.services.files import open_path, parse_saved
-from tui.services.output import chain_summary
+from tui.services.output import chain_summary, warning_lines
 from tui.services.session import RunRequest, RunSession
 from tui.widgets.command_hint import CommandHint
 
@@ -124,6 +124,9 @@ class RunScreen(ModalScreen):
         chain = chain_summary(self.session.lines)
         if chain is not None:
             text += "\n" + chain.sentence()
+        warnings = warning_lines(self.session.lines)
+        if warnings:
+            text += "\nWarnings:\n" + "\n".join(f"- {w}" for w in warnings)
         self.query_one("#run-summary", Static).update(text)
         self._show_state("done")
 

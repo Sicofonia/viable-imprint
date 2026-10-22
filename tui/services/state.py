@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from lib import homeostat, manifest, orchestrator
 from tui.services.context import Context
 
@@ -165,3 +167,16 @@ def decisions(root: Path) -> list:
     """The homeostat decision log, newest first."""
     logged = homeostat.load_decisions(root)
     return sorted(reversed(logged), key=lambda d: d.get("date", ""), reverse=True)
+
+
+def featured(root: Path, kind: str) -> list:
+    """Explorers or dishes already featured (`featured_<kind>.yaml`, kept by `newsletter-track`),
+    newest first. A missing or unreadable file is an empty list, as `newsletter-scan` treats it."""
+    path = root / f"featured_{kind}.yaml"
+    if not path.is_file():
+        return []
+    try:
+        entries = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    except yaml.YAMLError:
+        return []
+    return list(reversed(entries)) if isinstance(entries, list) else []

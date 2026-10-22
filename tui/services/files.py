@@ -11,6 +11,7 @@ month's newsletter notes file.
 import re
 import shutil
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import click
@@ -87,3 +88,38 @@ def dated_outputs(root: Path, system: str, stage: str) -> list:
     found = [DatedOutput(d.name, d / "combined.txt") for d in base.iterdir()
              if d.is_dir() and (d / "combined.txt").is_file()]
     return sorted(found, key=lambda o: o.date, reverse=True)
+
+
+# -- this month's newsletter notes (T6.2) ---------------------------------------------
+# `newsletter-scan` reads `<newsletter_dir>/notes/YYYY-MM.txt` (ADR 008). The operator writes
+# it by hand; the UI only creates it empty so there is a file to open in the editor.
+
+def today() -> date:
+    """Today's date. A function so tests can freeze it."""
+    return date.today()
+
+
+def this_month() -> str:
+    return today().isoformat()[:7]
+
+
+def notes_path(ctx) -> Path:
+    return ctx.data_dir("newsletter_dir") / "notes" / f"{this_month()}.txt"
+
+
+def notes_state(ctx) -> str:
+    """"missing", "empty" (nothing but whitespace, which `newsletter-scan` treats as none) or "ready".
+    Looking creates nothing."""
+    path = notes_path(ctx)
+    if not path.is_file():
+        return "missing"
+    return "ready" if path.read_text(encoding="utf-8").strip() else "empty"
+
+
+def ensure_notes_file(ctx) -> Path:
+    """This month's notes file, created empty if it does not exist. Never overwrites."""
+    path = notes_path(ctx)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    return path

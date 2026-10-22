@@ -78,3 +78,11 @@ def ingest_receipt(lines: list):
             if m:
                 setattr(receipt, attribute, m.group(1) if attribute == "format" else int(m.group(1)))
     return receipt if receipt.format else None
+
+
+# -- warnings (T6.2) ---------------------------------------------------------------------
+
+def warning_lines(lines: list) -> list:
+    """The text of every `Warning: ...` line a command printed (the engines print their advisory
+    notices that way, for example `newsletter-track` when an explorer repeats)."""
+    return [line.strip()[len("Warning:"):].strip() for line in lines if line.strip().startswith("Warning:")]

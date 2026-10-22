@@ -9,7 +9,7 @@ from textual.widgets import Button, Checkbox, DataTable, Input, Static, TabbedCo
 
 from lib import orchestrator
 from tui.screens.base import BaseScreen
-from tui.services import commands, estimate, state
+from tui.services import commands, estimate, files, state
 from tui.services.command_model import build_model
 from tui.services.files import open_path
 from tui.services.session import RunRequest
@@ -41,15 +41,35 @@ class PeriodicScreen(BaseScreen):
                     yield Input(id="hs-decision", placeholder="what you decided")
                     yield Static("", id="hs-log-error", markup=False)
                     yield RunButton("Log decision", id="hs-log")
+            with TabPane("Newsletter", id="tab-newsletter"):
+                with VerticalScroll():
+                    yield DataTable(id="nl-status", cursor_type="row")
+                    yield Static("", id="nl-notes-state", markup=False)
+                    yield Static("", id="nl-warning", markup=False)
+                    yield Button("Open this month's notes", id="nl-notes")
+                    yield Checkbox("One stage only (the scan, then stop)", id="nl-step")
+                    yield CommandHint(id="nl-hint")
+                    with Horizontal(classes="periodic-actions"):
+                        yield RunButton("Run newsletter chain", id="nl-run")
+                        yield Button("Open the final newsletter", id="nl-open", disabled=True)
+                    yield Static("Already featured: explorers", classes="section", markup=False)
+                    yield DataTable(id="nl-explorers", cursor_type="row", zebra_stripes=True)
+                    yield Static("Already featured: dishes", classes="section", markup=False)
+                    yield DataTable(id="nl-dishes", cursor_type="row", zebra_stripes=True)
 
     def on_mount(self) -> None:
         model = {tuple(s.path): s for s in build_model(self.app.root)}
         self._specs = {name: model[path] for name, path in (
-            ("hs-run", ("s2", "homeostat", "run")), ("hs-log", ("s5", "log-decision")))}
+            ("hs-run", ("s2", "homeostat", "run")), ("hs-log", ("s5", "log-decision")),
+            ("nl-run", ("s2", "newsletter", "run")))}
         self.query_one("#hs-status", DataTable).add_columns("Stage", "Last outcome", "Detail")
         self.query_one("#hs-decisions", DataTable).add_columns("Date", "Tension", "Decision")
+        self.query_one("#nl-status", DataTable).add_columns("Stage", "Last outcome", "Detail")
+        for table in ("#nl-explorers", "#nl-dishes"):
+            self.query_one(table, DataTable).add_columns("Name", "Featured on")
         self.refresh_state()
         self._update_hint()
+        self._update_newsletter_hint()
 
     def on_screen_resume(self) -> None:
         self.refresh_state()
@@ -88,6 +108,80 @@ class PeriodicScreen(BaseScreen):
         log.clear()
         for d in state.decisions(self.homeostat_root):
             log.add_row(d.get("date", "?"), d.get("tension", ""), d.get("decision", ""))
+        self.refresh_newsletter()
+
+    # -- newsletter ------------------------------------------------------------------------------
+
+    @property
+    def newsletter_root(self):
+        return self.app.ctx.data_dir("newsletter_dir")
+
+    def _notes_warning(self):
+        """Why the chain would run without this month's notes, or None."""
+        notes = files.notes_state(self.app.ctx)
+        if notes == "missing":
+            return "There are no notes for this month. The newsletter will be written without them."
+        if notes == "empty":
+            return "This month's notes file is empty. The newsletter will be written without them."
+        return None
+
+    def refresh_newsletter(self) -> None:
+        table = self.query_one("#nl-status", DataTable)
+        table.clear()
+        for row in state.periodic_rows(self.newsletter_root, orchestrator.NEWSLETTER_TASKS):
+            table.add_row(row.key, row.status, row.detail, key=row.key)
+
+        notes = files.notes_state(self.app.ctx)
+        month = files.this_month()
+        detail = notes
+        if notes == "ready":
+            detail = f"{len(files.notes_path(self.app.ctx).read_text(encoding='utf-8')):,} characters"
+        self.query_one("#nl-notes-state", Static).update(f"Notes for {month}: {detail}")
+        warning = self._notes_warning()
+        self.query_one("#nl-warning", Static).update(f"Warning: {warning}" if warning else "")
+        self.query_one("#nl-run", RunButton).label = "Run newsletter chain (no notes!)" if warning else "Run newsletter chain"
+
+        final = state.recorded_output(self.newsletter_root, orchestrator.NEWSLETTER_TASKS[-1])
+        self.query_one("#nl-open", Button).disabled = final is None
+        for kind, table_id in (("explorers", "#nl-explorers"), ("dishes", "#nl-dishes")):
+            featured = self.query_one(table_id, DataTable)
+            featured.clear()
+            for entry in state.featured(self.newsletter_root, kind):
+                featured.add_row(str(entry.get("name", "?")), str(entry.get("date_featured", "?")))
+
+    def _newsletter_values(self) -> dict:
+        return {"step": self.query_one("#nl-step", Checkbox).value}
+
+    def _update_newsletter_hint(self) -> None:
+        self.query_one("#nl-hint", CommandHint).show_argv(
+            commands.argv_for(self.app.ctx, self._specs["nl-run"], self._newsletter_values()))
+
+    @on(Checkbox.Changed, "#nl-step")
+    def _newsletter_step_changed(self) -> None:
+        self._update_newsletter_hint()
+
+    @on(Button.Pressed, "#nl-notes")
+    def _open_notes(self) -> None:
+        path = files.ensure_notes_file(self.app.ctx)   # an empty file to write in, if there is none yet
+        self.refresh_newsletter()
+        open_path(path)
+
+    @on(RunButton.Pressed, "#nl-run")
+    def _run_newsletter(self) -> None:
+        values = self._newsletter_values()
+        argv = commands.argv_for(self.app.ctx, self._specs["nl-run"], values)
+        try:
+            guess = estimate.estimate_periodic(self.app.ctx, orchestrator.NEWSLETTER_TASKS, step=values["step"])
+        except Exception:  # noqa: BLE001 - an estimate must never stop the operator from running
+            guess = None
+        warning = self._notes_warning()
+        self.app.begin_run(RunRequest("s2 newsletter run", argv, estimate=guess, warnings=[warning] if warning else []))
+
+    @on(Button.Pressed, "#nl-open")
+    def _open_newsletter(self) -> None:
+        final = state.recorded_output(self.newsletter_root, orchestrator.NEWSLETTER_TASKS[-1])
+        if final is not None:
+            open_path(final)
 
     # -- running the chain -----------------------------------------------------------------------
 
