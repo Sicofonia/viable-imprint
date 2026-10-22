@@ -780,3 +780,16 @@ Found by the full suite (not by the books tests run alone — it is timing-depen
 - **Mark as synced** builds `s5 check-policy-sync --update` and always opens the run modal's confirmation first, using the explorer's wording ("rewrites the stored sync hash ... Continue only after reviewing that prompt against the Editorial Policy section of docs/vsm.md"), because `RunRequest.confirm` is set. A document that cannot be checked (the policy heading is missing from `vsm.md`, a file is missing) shows "Cannot check the policy prompt: ..." and disables the button with the reason; the status helper reports such errors instead of raising.
 - `state.policy_status(vsm_path, prompt_path)` takes the two paths as parameters, so the tests use temporary copies and assert the real files are byte-identical afterwards. Nothing in the tests runs `--update`: the button test intercepts the run request, and the decline test cancels at the confirmation. A test also checks the status agrees with the real `s5 check-policy-sync` on the committed files.
 - Health (T8.1) reuses `policy_status` for its own line.
+
+### Phase 8 — Cross-cutting
+
+**T8.1 — Health.** The health screen (`h`) is a read-only table of what would make a run fail, with a summary ("Nothing would stop a run." or "2 errors, 1 warning."), a detail line for the selected row and an "Open the fix" button (the file to open, or the screen to go to) where one applies; `f5` checks again. The checks (`services/health.py`):
+- **Config**: found and parsed (an unreadable or unparsable file stops the report with that one error).
+- **LLM and translation providers**: provider set and known, `llm.model` set, and each environment variable the provider needs reported as `set` or `missing (add it to .env)`; **the value is never read into any text** (tests set a distinctive key and assert it appears nowhere in the checks or in a screenshot of the screen). For eTranslation, `receiver_url` must be set, `https`, without a query, and not the example placeholder. The `fake` provider is flagged as a warning ("not for real work").
+- **Pricing**: configured or not for each provider (information, not an error: pricing is optional).
+- **Task files**: for every task in every `systems/*/tasks.yaml`, each of `prompt`, `reduce_prompt`, `metadata_config`, `style_config` and `sources_config` must exist; a missing one is an error naming the file and, when there is a shipped example, the copy to make (`prompts/examples/...`, or `foo.example.yaml`), with the example as the fix link.
+- **Formatting**: the book template named in `templates/format_styles.yaml` must exist (error). **LibreOffice is information only**, as T0.1 found: `s1b format` writes the `.odt` without it, and it is needed only to export the PDF by hand for S1C.
+- **Policy**: the T7.2 status, a warning pointing at the candidates screen.
+- **Data folders**: a missing one is a warning (each is created when first needed).
+- The table of which variables each provider needs is the one place this duplicates knowledge from `providers/__init__.py`; two tests read that file and fail if a provider or variable is added there and not here.
+- Run against the operator's real configuration on this machine, all 24 checks are OK; that is also a test, skipped (naming the missing file) where personal files are absent.

@@ -406,3 +406,17 @@ CandidatesScreen #cand-decision-error, CandidatesScreen #cand-new-error {
     color: $error;
     height: auto;
 }
+
+HealthScreen #health-summary {
+    text-style: bold;
+    padding: 0 1;
+}
+
+HealthScreen #health-checks {
+    height: auto;
+    max-height: 30;
+}
+
+HealthScreen #health-detail {
+    padding: 1 1 0 1;
+}
