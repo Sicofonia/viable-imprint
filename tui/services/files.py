@@ -123,3 +123,29 @@ def ensure_notes_file(ctx) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("", encoding="utf-8")
     return path
+
+
+# -- candidate briefs (T7.1) -------------------------------------------------------------------
+
+def brief_path(ctx, slug: str) -> Path:
+    return ctx.data_dir("candidates_dir") / "s1a" / "briefs" / f"{slug}.txt"
+
+
+def candidate_slug_problem(ctx, slug: str):
+    """Why `slug` cannot name a new candidate, or None."""
+    if not slug:
+        return "Enter a name for the candidate."
+    if not SLUG_RE.match(slug):
+        return "Use lowercase letters, digits and single hyphens only (for example la-croisiere-jaune)."
+    if brief_path(ctx, slug).exists():
+        return f"A candidate called {slug!r} already exists."
+    return None
+
+
+def create_brief(ctx, slug: str) -> Path:
+    """The candidate's empty brief file, for the operator to write in. Never overwrites."""
+    path = brief_path(ctx, slug)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    return path

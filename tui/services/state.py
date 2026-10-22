@@ -5,6 +5,7 @@ Thin wrappers over `lib/` read functions (`orchestrator.book_status`,
 changed signature in `lib/` breaks a test immediately. Nothing in this module
 writes anything. Plain Python, no Textual.
 """
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -180,3 +181,81 @@ def featured(root: Path, kind: str) -> list:
     except yaml.YAMLError:
         return []
     return list(reversed(entries)) if isinstance(entries, list) else []
+
+
+# -- candidates under System 5 evaluation (T7.1) -----------------------------------------------
+# Folder conventions from ADR 006: briefs in `candidates/s1a/briefs/<slug>.txt`, verdicts in
+# `candidates/s5/evaluate/<slug>.txt`, the Director's decisions in `candidates/calibration.yaml`.
+
+_VERDICT = re.compile(r"<verdict>\s*(.*?)\s*</verdict>")   # the same pattern `candidate record-decision` uses
+NO_VERDICT_TAG = "?"
+
+
+@dataclass
+class CandidateRow:
+    slug: str
+    brief: Path
+    verdict_file: Path = None
+    state: str = "not evaluated"      # not evaluated | evaluated | decided
+    verdict: str = None               # the <verdict> value, "?" when the file has no tag
+    decision: str = None
+    decided_on: str = None
+    brief_empty: bool = False
+
+
+@dataclass
+class CalibrationCount:
+    verdict: str
+    decision: str
+    count: int
+
+
+def read_verdict(path: Path) -> str:
+    match = _VERDICT.search(path.read_text(encoding="utf-8"))
+    return match.group(1) if match else NO_VERDICT_TAG
+
+
+def calibration_entries(root: Path) -> list:
+    path = root / "calibration.yaml"
+    if not path.is_file():
+        return []
+    try:
+        entries = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    except yaml.YAMLError:
+        return []
+    return [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+
+
+def candidate_rows(root: Path) -> list:
+    """Every brief under `s1a/briefs/`, by name, with where it stands. The decision shown is the
+    latest one logged for the candidate."""
+    briefs = root / "s1a" / "briefs"
+    if not briefs.is_dir():
+        return []
+    latest = {}
+    for entry in calibration_entries(root):
+        latest[entry.get("candidate")] = entry
+    rows = []
+    for brief in sorted(briefs.glob("*.txt")):
+        slug = brief.stem
+        row = CandidateRow(slug=slug, brief=brief, brief_empty=not brief.read_text(encoding="utf-8").strip())
+        verdict_file = root / "s5" / "evaluate" / f"{slug}.txt"
+        if verdict_file.is_file():
+            row.verdict_file, row.verdict, row.state = verdict_file, read_verdict(verdict_file), "evaluated"
+        if slug in latest:
+            row.state = "decided"
+            row.decision = str(latest[slug].get("human_decision"))
+            row.decided_on = str(latest[slug].get("date", ""))
+            if row.verdict is None:
+                row.verdict = str(latest[slug].get("agent_verdict"))
+        rows.append(row)
+    return rows
+
+
+def calibration_counts(root: Path) -> list:
+    """How often each verdict ended in each decision, over everything logged in calibration.yaml."""
+    counts = {}
+    for entry in calibration_entries(root):
+        key = (str(entry.get("agent_verdict")), str(entry.get("human_decision")))
+        counts[key] = counts.get(key, 0) + 1
+    return [CalibrationCount(v, d, n) for (v, d), n in sorted(counts.items())]

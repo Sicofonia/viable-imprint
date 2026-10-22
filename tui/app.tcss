@@ -360,3 +360,45 @@ PeriodicScreen #hs-log-error {
     color: $error;
     height: auto;
 }
+
+CandidatesScreen #cand-reminder {
+    color: $text-muted;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+CandidatesScreen #cand-policy {
+    color: $warning;
+    text-style: bold;
+    padding: 0 1;
+    height: auto;
+}
+
+CandidatesScreen DataTable {
+    height: auto;
+    max-height: 12;
+}
+
+CandidatesScreen .section {
+    text-style: bold;
+    margin-top: 1;
+}
+
+CandidatesScreen .cand-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+CandidatesScreen .cand-actions Button, CandidatesScreen .cand-actions Select {
+    margin-right: 1;
+}
+
+CandidatesScreen .cand-actions Input {
+    width: 1fr;
+    margin-right: 1;
+}
+
+CandidatesScreen #cand-decision-error, CandidatesScreen #cand-new-error {
+    color: $error;
+    height: auto;
+}
