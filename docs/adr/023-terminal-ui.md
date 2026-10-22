@@ -736,3 +736,11 @@ Found by the full suite (not by the books tests run alone — it is timing-depen
 - An unrecognised CSV shows the CLI's own error and the formats it knows ("Could not recognize this CSV's format automatically (columns: ...). Pass --format explicitly. Known formats: ingramspark, kdp"), taken from the end of the log (`services/output.ingest_receipt`).
 - Forcing a format puts `--format <name>` in the command, shown before running.
 - The ISBN rule itself stays where it was (the engine refuses without one; ADR 011): the UI only keeps the button from starting a run that would fail.
+
+### Phase 5 — Strategic intelligence (S4) and outbound articles (S1D)
+
+**T5.1 — Intelligence screen.** Four stages in the order they feed each other, each with a list of its past runs (newest first, from `files.dated_outputs`, which reads `<root>/<system>/<stage>/<date>/combined.txt` and sorts by the folder's date name, never by modification time) and an Open selected button: Scans, Briefings, Content strategies, Article drafts. Each stage's action works on the selected output of the stage before it (the newest unless the operator picks another), and its button says which, for example "Brief scan 2026-10-15". The header shows the date of the last scan.
+- **Scan** runs `s4 scan` (network, no LLM). Only when no scan exists yet does the run modal open with the ADR 003 warning that the first scan surfaces many old items; a later scan starts at once.
+- **Scan and brief** runs the scan with a follow-up (`RunRequest.on_done`): only if it succeeded does the finished scan's log give way to the briefing's confirmation. A failed or cancelled scan leaves its log on screen and starts nothing (tested with the runner stubbed to fail).
+- Briefing, content strategy and article draft (`s1d article-draft`) are provider calls, so each opens with the Decision 5 confirmation computed for the chosen input. The screen reads state from the lists, not the ledger: S4 is not book-scoped and has no readiness graph.
+- Tested end to end through the UI on fake providers and the stubbed feed: scan, briefing, content strategy and article draft each write their dated `combined.txt` and appear in their list.

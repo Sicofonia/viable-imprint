@@ -308,3 +308,26 @@ PerformanceScreen #ingest-actions Button {
 PerformanceScreen #ingest-receipt {
     margin-top: 1;
 }
+
+IntelligenceScreen #last-scan {
+    text-style: bold;
+    padding: 0 1;
+}
+
+IntelligenceScreen .stage-heading {
+    text-style: bold;
+    margin-top: 1;
+}
+
+IntelligenceScreen DataTable {
+    height: auto;
+    max-height: 8;
+}
+
+IntelligenceScreen .stage-actions {
+    height: auto;
+}
+
+IntelligenceScreen .stage-actions Button {
+    margin-right: 1;
+}

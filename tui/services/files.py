@@ -10,6 +10,7 @@ month's newsletter notes file.
 """
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -65,3 +66,24 @@ def copy_source(ctx, slug: str, source) -> Path:
     target = folder / Path(source).name
     shutil.copy2(source, target)
     return target
+
+
+# -- dated run folders (T5.1) --------------------------------------------------------
+# S4 and the outbound articles write `<root>/<system>/<stage>/<YYYY-MM-DD>/combined.txt`
+# (ADR 003, ADR 012). The date is the folder name, so "newest" is the largest name.
+
+@dataclass
+class DatedOutput:
+    date: str
+    path: Path
+
+
+def dated_outputs(root: Path, system: str, stage: str) -> list:
+    """Every finished run of a dated stage, newest first. A folder without the output
+    (a run that failed before writing it) and non-folders such as `_state.yaml` are skipped."""
+    base = Path(root) / system / stage
+    if not base.is_dir():
+        return []
+    found = [DatedOutput(d.name, d / "combined.txt") for d in base.iterdir()
+             if d.is_dir() and (d / "combined.txt").is_file()]
+    return sorted(found, key=lambda o: o.date, reverse=True)
