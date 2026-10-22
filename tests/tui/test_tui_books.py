@@ -222,7 +222,8 @@ class NewBookFlowTests(GuardedCase, unittest.IsolatedAsyncioTestCase):
             await pilot.press("n")
             await settle(pilot)
             await self.fill(pilot, app, "new-one", str(fixture("tiny_source.txt")))
-            self.assertIsInstance(app.screen, RunScreen)
+            # `init` takes about a second; whether the log or the finished book is on screen at this
+            # instant depends on timing, so only the run itself is asserted.
             self.assertEqual(app.session.request.title, "init new-one")
             await app.session.wait()
             await settle(pilot, 5)

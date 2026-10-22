@@ -221,3 +221,21 @@ BookScreen #pipeline-title {
 BookScreen #pipeline-hint {
     padding: 0;
 }
+
+BookScreen #book-actions-title {
+    text-style: bold;
+    margin-top: 2;
+}
+
+BookScreen #isbn-row {
+    height: auto;
+}
+
+BookScreen #isbn-row Input {
+    width: 1fr;
+}
+
+BookScreen #isbn-error {
+    color: $error;
+    height: auto;
+}

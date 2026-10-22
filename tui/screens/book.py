@@ -6,10 +6,12 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Checkbox, DataTable, Select, Static
+from textual.widgets import Button, Checkbox, DataTable, Input, Select, Static
 
 from tui.screens.base import BaseScreen
 from tui.services import commands, estimate, state
+from tui.services.files import open_path
+from tui.services.validate import normalize_isbn
 from tui.services.command_model import CommandSpec, build_model, group_helps
 from tui.services.session import RunRequest
 from tui.widgets.command_hint import CommandHint
@@ -44,11 +46,21 @@ class BookScreen(BaseScreen):
                 yield CommandHint(id="task-hint")
                 with Horizontal(id="task-actions"):
                     yield RunButton("Run task", id="run-task")
+                    yield Button("Open file", id="open-file")
+                    yield Button("Open folder", id="open-folder")
                 yield Static("Run the pipeline", id="pipeline-title", markup=False)
                 yield Select(PIPELINE_SCOPES, allow_blank=False, value="all", id="pipeline-scope")
                 yield Checkbox("One step only (run a single ready task and stop)", id="pipeline-step")
                 yield CommandHint(id="pipeline-hint")
                 yield RunButton("Run pipeline", id="run-pipeline")
+                yield Static("This book", id="book-actions-title", markup=False)
+                with Horizontal(id="book-actions"):
+                    yield Button("Open book folder", id="open-book-folder")
+                    yield Button("Open manifest.yaml", id="open-manifest")
+                with Horizontal(id="isbn-row"):
+                    yield Input(id="isbn", placeholder="ISBN-10 or ISBN-13")
+                    yield RunButton("Set ISBN", id="set-isbn")
+                yield Static("", id="isbn-error", markup=False)
 
     def on_mount(self) -> None:
         self.system_labels = {path[0]: label for path, label in group_helps(self.app.root).items() if len(path) == 1}
@@ -122,6 +134,8 @@ class BookScreen(BaseScreen):
             await options.set_spec(CommandSpec([], "", []))
             self.query_one("#task-hint", CommandHint).clear()
             button.display = False
+            self.query_one("#open-file", Button).disabled = True
+            self.query_one("#open-folder", Button).disabled = True
             return
         lines = [f"{row.system} {row.name}", f"State: {row.status}", row.detail]
         if row.output:
@@ -130,6 +144,9 @@ class BookScreen(BaseScreen):
         if self._options_for != row.key:
             self._options_for = row.key
             await options.set_spec(self._options_spec(row))
+        output = self.root / row.output if row.output else None
+        self.query_one("#open-file", Button).disabled = not (output and output.is_file())
+        self.query_one("#open-folder", Button).disabled = not (output and output.parent.is_dir())
         button.display = True
         button.label = "Run again" if row.status == "done" else "Retry" if row.status == "failed" else "Run task"
         button.blocked_reason = None if row.runnable else row.detail
@@ -213,3 +230,49 @@ class BookScreen(BaseScreen):
             guess = None
         title = f"s2 run {self.slug}" + (f" --only {values['only']}" if values["only"] else "")             + (" --step" if values["step"] else "")
         self.app.begin_run(RunRequest(title, argv, estimate=guess))
+
+    # -- outputs and book facts -----------------------------------------------------
+
+    @on(Button.Pressed, "#open-file")
+    def _open_file(self) -> None:
+        row = self.selected()
+        if row is not None and row.output:
+            open_path(self.root / row.output)
+
+    @on(Button.Pressed, "#open-folder")
+    def _open_folder(self) -> None:
+        row = self.selected()
+        if row is not None and row.output:
+            open_path((self.root / row.output).parent)
+
+    @on(Button.Pressed, "#open-book-folder")
+    def _open_book_folder(self) -> None:
+        open_path(self.root)
+
+    @on(Button.Pressed, "#open-manifest")
+    def _open_manifest(self) -> None:
+        # Opened in the operator's editor for reading; the UI never writes this file.
+        open_path(self.root / "manifest.yaml")
+
+    def _set_isbn_spec(self) -> CommandSpec:
+        return next(s for s in build_model(self.app.root) if s.path == ["book", "set-isbn"])
+
+    @on(Input.Changed, "#isbn")
+    def _isbn_typed(self) -> None:
+        self.query_one("#isbn-error", Static).update("")
+
+    @on(RunButton.Pressed, "#set-isbn")
+    def _set_isbn(self) -> None:
+        isbn, problem = normalize_isbn(self.query_one("#isbn", Input).value)
+        if problem:
+            self.query_one("#isbn-error", Static).update(problem)
+            return
+        current = state.book_row(self.root).isbn
+        warnings = []
+        if current and current != isbn:
+            warnings.append(f"This book already has the ISBN {current}. Setting {isbn} replaces it. Sales entries "
+                            "already ingested are kept as they are; later ingests match the new ISBN.")
+        elif current == isbn:
+            warnings.append(f"This book already has the ISBN {isbn}; running this changes nothing.")
+        argv = commands.argv_for(self.app.ctx, self._set_isbn_spec(), {"book_slug": self.slug, "isbn": isbn})
+        self.app.begin_run(RunRequest(f"book set-isbn {self.slug}", argv, warnings=warnings))
