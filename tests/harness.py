@@ -263,6 +263,56 @@ class RealDataGuard:
             raise AssertionError(f"real data folders changed: added={added} removed={removed} changed={changed}")
 
 
+class GuardedCase(unittest.TestCase):
+    """A TestCase that fails if it touched the operator's real data folders."""
+
+    def setUp(self):
+        self.guard = RealDataGuard()
+        self.addCleanup(self.guard.assert_unchanged)
+
+
+# ---------------------------------------------------------------------------
+# A fixed multi-book portfolio, for dashboard tests (T0.4, T0.5, T4.1)
+# ---------------------------------------------------------------------------
+
+def seed_portfolio(ws: Workspace) -> list:
+    """Four books with hand-written ledgers (no pipeline run, so every number is
+    exact and stable). `book-d` costs and runs 10x its peers, so the cost flag
+    and the `s1b.cleanup` duration flag both fire for it (ADR 010). `book-d` has
+    USD revenue, `book-c` EUR revenue only (no margin), `book-b` has a task with
+    no cost at all. Returns the slugs."""
+    from lib import manifest
+
+    books = {
+        "book-a": {"cleanup": (10.0, 0.01), "translate": (5.0, 0.0001)},
+        "book-b": {"cleanup": (10.0, 0.01), "format": (2.0, None)},
+        "book-c": {"cleanup": (10.0, 0.01)},
+        "book-d": {"cleanup": (100.0, 0.10), "translate": (5.0, 0.0001)},
+    }
+    for index, (slug, tasks) in enumerate(books.items()):
+        root = ws.book(slug)
+        (root / "s1b" / "source").mkdir(parents=True)
+        manifest.save(root, {"slug": slug, "source": None})
+        for name, (duration, cost) in tasks.items():
+            fields = {"status": "done", "output": f"s1b/{name}/x.txt",
+                      "completed_at": f"2026-09-{index + 1:02d}T10:00:00+00:00", "duration_seconds": duration}
+            if cost is not None:
+                translation = name == "translate"
+                fields.update(provider="fake", cost_usd=cost,
+                              usage={"characters": 5000} if translation else
+                              {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500})
+                if not translation:
+                    fields["model"] = "fake-1"
+            manifest.record_task(root, f"s1b.{name}", **fields)
+    manifest.record_sale(ws.book("book-d"), [{
+        "platform": "ingramspark", "period_start": "2026-07-01", "period_end": "2026-07-31",
+        "units": 12, "revenue": 48.6, "currency": "USD", "ingested_at": "2026-08-01T00:00:00+00:00"}])
+    manifest.record_sale(ws.book("book-c"), [{
+        "platform": "kdp", "period_start": "2026-08-03", "period_end": "2026-08-17",
+        "units": 5, "revenue": 20.0, "currency": "EUR", "ingested_at": "2026-08-18T00:00:00+00:00"}])
+    return list(books)
+
+
 # Taken when this module is first imported, i.e. before any test has run
 # (unittest imports every test module before running the first test).
 SUITE_GUARD = RealDataGuard()

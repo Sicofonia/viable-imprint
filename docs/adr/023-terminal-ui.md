@@ -644,4 +644,23 @@ Works with the current layout. Verified in a scratch copy: adding `[project.opti
 
 ## Implementation notes
 
-*(Appended per task as each one is completed.)*
+*Appended per task as each one is completed.*
+
+### Phase 0 — Groundwork
+
+**T0.2 — Fake providers.** `providers/llm/fake.py` and `providers/translation/fake.py`, wired into `get_llm_provider` / `get_translation_provider` with a shared option reader (`fail`, `delay_seconds`, validated). The fake LLM embeds an excerpt of its input (first 200 characters) with `<` and `>` replaced by `‹` `›`, so a fake output fed to the next stage (briefs feed the expansion tasks) can never open a second `<overview>` that a downstream regex would match instead of the real one. Consequence: the original manuscript text survives only the first fake stage; later stages carry nested fake boilerplate. Tests assert structure, not prose. `llm.model` is still required for `fake` (see Verification notes). README gains a "Tests" section saying the fakes are for tests only.
+
+**T0.3 — Harness.** `tests/harness.py` as specified, plus three additions the ADR did not list:
+- `tests/example_pipeline.py`, an "example-mode" launcher: `pipeline.py` with `task_loader.load_system_tasks` replaced by `harness.example_tasks` (prompts to `prompts/examples/`, metadata and sources configs to the fixtures) before `pipeline` is imported, and `httpx.get` stubbed to serve `tiny_feed.xml`. `run_cli(..., example=True)` uses it. Reason: a subprocess cannot be patched from the test process, and without it every CLI case would skip on a clean clone and the UI's subprocess-based tests (T5.1 in particular) could not stub the network. The launcher is only ever used by tests; the UI shows the operator `pipeline.py` commands as usual.
+- `GuardedCase`, a `TestCase` that asserts the operator's real data folders are unchanged after each test, and a suite-level guard: `harness.SUITE_GUARD` takes its listing when the harness is first imported and `tests/test_zz_real_data_guard.py` (sorts last) compares it after everything has run.
+- `seed_portfolio(ws)`: four hand-written ledgers (exact numbers) with a cost outlier, a duration outlier, USD and EUR revenue and a task with no cost, reused by the S3 baseline, T0.5 and T4.1.
+`require_personal_files()` also checks the `.odt` template named inside `format_styles.yaml`. `example_manifests()` patches the manifest loader in-process (for `orchestrator.run_book` and `run_periodic`).
+
+**T0.4 — Baseline.** `tests/test_pipeline_baseline.py` (25 tests, about 60 seconds, mostly subprocess start-up). Differences from the ADR's wording:
+- The rendered homeostat page is `homeostat/s5/homeostat-render/<date>/combined.html`, not `homeostat.html` (the render task keeps its input's file stem). Later tasks find it by glob.
+- `s1b format` does not use LibreOffice, so `s2 run --only s1b` completes `format` whenever the personal template exists; the test expects `failed` for `format` only when it does not.
+- "Independent siblings still run" is tested on S1D: after S1B and `brief` succeed, `fail: true` is switched on and `s2 run --only s1d` completes `metadata` (no LLM) while the six LLM expansions fail (exit 1, `Done: 1, Failed: 6`); switching it off and re-running retries them.
+- The briefing case copies `tiny_combined_scan.txt` into `intelligence/s4/scan/<date>/`, because a task input must live under a folder with a `manifest.yaml` for the root to resolve.
+- The direct-invocation root problem (Verification notes, item 2) is pinned by two tests that will fail when it is fixed.
+- S4 `scan` runs in-process with `engines.feed_scan.httpx.get` patched; S1C PDFs are generated with `pikepdf`; `check-policy-sync` is run without `--update`, and the test asserts the committed prompt and `docs/vsm.md` are byte-identical afterwards.
+

@@ -10,18 +10,11 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import harness  # noqa: E402
-from harness import REPO_ROOT, Workspace, fixture, ledger, make_book, run_cli  # noqa: E402
+from harness import GuardedCase, REPO_ROOT, Workspace, fixture, ledger, make_book, run_cli  # noqa: E402
 from lib import task_loader  # noqa: E402
-
-
-class GuardedCase(unittest.TestCase):
-    """Fails the test if it touched the operator's real data folders."""
-
-    def setUp(self):
-        self.guard = harness.RealDataGuard()
-        self.addCleanup(self.guard.assert_unchanged)
 
 
 class WorkspaceTests(GuardedCase):
