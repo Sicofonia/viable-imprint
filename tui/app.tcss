@@ -2,4 +2,74 @@
 
 HomeScreen #welcome {
     padding: 1 2;
+    text-style: bold;
+}
+
+HomeScreen #menu {
+    margin: 0 2;
+    height: auto;
+    max-height: 20;
+}
+
+PlaceholderScreen #placeholder {
+    padding: 1 2;
+}
+
+RunScreen, HelpScreen {
+    align: center middle;
+}
+
+#run-dialog {
+    width: 90%;
+    height: 85%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#run-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#run-confirm {
+    height: 1fr;
+    padding: 1 0;
+}
+
+#run-log {
+    height: 1fr;
+    border: round $primary-darken-2;
+}
+
+#run-summary {
+    height: auto;
+    padding: 1 0;
+    text-style: bold;
+}
+
+#run-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+#run-buttons Button {
+    margin-left: 1;
+}
+
+#help-dialog {
+    width: 80;
+    height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#help-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#help-notes {
+    margin-top: 1;
 }
