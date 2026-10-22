@@ -14,8 +14,12 @@ Two ways to exercise the CLI:
   CLI with every task redirected to `prompts/examples/` and the fixtures (see
   `example_tasks()`), so it works on a clean clone.
 """
+import asyncio
 import contextlib
 import copy
+import faulthandler
+import functools
+import inspect
 import os
 import subprocess
 import sys
@@ -277,8 +281,45 @@ class RealDataGuard:
             raise AssertionError(f"real data folders changed: added={added} removed={removed} changed={changed}")
 
 
-class GuardedCase(unittest.TestCase):
-    """A TestCase that fails if it touched the operator's real data folders."""
+def _bounded(test):
+    @functools.wraps(test)
+    async def wrapper(self, *args, **kwargs):
+        try:
+            return await asyncio.wait_for(test(self, *args, **kwargs), self.TEST_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise AssertionError(f"{test.__name__} did not finish within {self.TEST_TIMEOUT:g} s (hung?)") from None
+    wrapper._bounded = True
+    return wrapper
+
+
+class Bounded:
+    """Mix-in: a test that starts a subprocess or the UI cannot block the suite.
+
+    - Every `async def test_*` in a subclass fails after TEST_TIMEOUT seconds instead of waiting forever.
+    - A watchdog covers what that cannot: if a test (sync or async) is still running after WATCHDOG seconds
+      (for example the event loop itself is stuck), every thread's stack is written to stderr, naming the
+      test, and the process exits, so a hang ends the run with a diagnosis rather than blocking it.
+    """
+
+    TEST_TIMEOUT = 120.0
+    WATCHDOG = 300.0
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for name, member in list(vars(cls).items()):
+            if name.startswith("test") and inspect.iscoroutinefunction(member) and not getattr(member, "_bounded", False):
+                setattr(cls, name, _bounded(member))
+
+    def run(self, result=None):
+        faulthandler.dump_traceback_later(self.WATCHDOG, exit=True)
+        try:
+            return super().run(result)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+
+
+class GuardedCase(Bounded, unittest.TestCase):
+    """A TestCase that fails if it touched the operator's real data folders, and cannot hang."""
 
     def setUp(self):
         self.guard = RealDataGuard()

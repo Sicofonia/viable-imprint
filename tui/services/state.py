@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from lib import manifest, orchestrator
+from lib import homeostat, manifest, orchestrator
 from tui.services.context import Context
 
 
@@ -112,3 +112,56 @@ def stale_consequences(root: Path, row: TaskRow) -> list:
 def ready_task_keys(root: Path, only: str = None) -> list:
     """Keys of the tasks `s2 run` would start right now (failed ones included: they are retried)."""
     return [f"{node['system']}.{node['task']['name']}" for node, _ in orchestrator.ready_tasks(root, only=only)]
+
+
+# -- periodic pipelines: homeostat and newsletter (T6.1, T6.2) ---------------------------
+
+@dataclass
+class StageRow:
+    system: str
+    name: str
+    status: str          # done | failed | never run
+    detail: str          # "<completed_at>  <output>", the error, or ""
+
+    @property
+    def key(self) -> str:
+        return f"{self.system}.{self.name}"
+
+
+def periodic_rows(root: Path, tasks: list) -> list:
+    """Each stage's last recorded outcome (`orchestrator.periodic_status`), worded like
+    `s2 homeostat status` / `s2 newsletter status`."""
+    rows = []
+    for row in orchestrator.periodic_status(root, tasks):
+        status = row["status"]
+        if status == "done":
+            detail = f"{row.get('completed_at', '')}  {row.get('output', '')}"
+        elif status == "failed":
+            detail = str(row.get("error"))
+        else:
+            detail = ""
+        rows.append(StageRow(row["system"], row["name"], status, detail))
+    return rows
+
+
+def recorded_output(root: Path, task: tuple):
+    """The file a finished periodic stage wrote, if the ledger records one and it still exists."""
+    entry = manifest.load(root).get("tasks", {}).get(f"{task[0]}.{task[1]}", {})
+    if entry.get("status") != "done" or not entry.get("output"):
+        return None
+    path = root / entry["output"]
+    return path if path.is_file() else None
+
+
+rendered_output = recorded_output   # the homeostat page and the final newsletter are both "a stage's recorded output"
+
+
+def latest_briefing_date(ctx: Context):
+    """Date folder of the System 4 briefing the homeostat will read, or None (`homeostat.latest_s4_briefing`)."""
+    return homeostat.latest_s4_briefing(ctx.config)[1]
+
+
+def decisions(root: Path) -> list:
+    """The homeostat decision log, newest first."""
+    logged = homeostat.load_decisions(root)
+    return sorted(reversed(logged), key=lambda d: d.get("date", ""), reverse=True)

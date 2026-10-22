@@ -331,3 +331,32 @@ IntelligenceScreen .stage-actions {
 IntelligenceScreen .stage-actions Button {
     margin-right: 1;
 }
+
+PeriodicScreen #hs-reads {
+    padding: 0 1;
+    color: $text-muted;
+}
+
+PeriodicScreen .section {
+    text-style: bold;
+    margin-top: 1;
+}
+
+PeriodicScreen .periodic-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+PeriodicScreen .periodic-actions Button {
+    margin-right: 1;
+}
+
+PeriodicScreen #hs-status, PeriodicScreen #hs-decisions {
+    height: auto;
+    max-height: 10;
+}
+
+PeriodicScreen #hs-log-error {
+    color: $error;
+    height: auto;
+}

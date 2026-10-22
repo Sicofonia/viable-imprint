@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from harness import EXAMPLE_LAUNCHER, GuardedCase, REPO_ROOT, Workspace, ledger, make_book, root_group  # noqa: E402
+from harness import EXAMPLE_LAUNCHER, Bounded, GuardedCase, REPO_ROOT, Workspace, ledger, make_book, root_group  # noqa: E402
 from tui.services import commands  # noqa: E402
 from tui.services.command_model import build_model  # noqa: E402
 from tui.services.context import Context  # noqa: E402
@@ -51,7 +51,7 @@ def python(code):
     return [sys.executable, "-c", code]
 
 
-class ScriptTests(unittest.IsolatedAsyncioTestCase):
+class ScriptTests(Bounded, unittest.IsolatedAsyncioTestCase):
     async def test_lines_arrive_in_order_and_before_the_process_exits(self):
         arrivals = []
         code = "import time\nprint('one', flush=True)\ntime.sleep(1.0)\nprint('two', flush=True)\n"
