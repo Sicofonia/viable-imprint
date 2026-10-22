@@ -65,12 +65,14 @@ def _flag_name(param) -> str:
     return longs[0] if longs else param.opts[0]
 
 
-def argv_for(ctx: Context, spec: CommandSpec, values: dict) -> list:
+def argv_for(ctx: Context, spec: CommandSpec, values: dict, *, keep_typed: bool = False) -> list:
     """The full argv for `spec` with the form's `values` (keyed by parameter name).
 
     Arguments come first in declaration order, then options, as in the cheat sheet.
     An option equal to its default, an unticked flag and an empty value are left out,
-    so the result is what an operator would type by hand."""
+    so the result is what an operator would type by hand. With `keep_typed`, a number the
+    operator did type stays in even if it equals the default (the print-prep screen uses
+    this so a bleed of 3 is visible in the command, as in the cheat sheet's examples)."""
     positionals, options = [], []
     for param in spec.params:
         value = values.get(param.name)
@@ -87,7 +89,8 @@ def argv_for(ctx: Context, spec: CommandSpec, values: dict) -> list:
         texts = [_text(param, item) for item in items]
         if param.kind == "argument":
             positionals.extend(texts)
-        elif len(texts) > 1 or param.multiple or not _same_as_default(param, texts[0]):
+        elif (len(texts) > 1 or param.multiple or (keep_typed and param.type in ("float", "int"))
+              or not _same_as_default(param, texts[0])):
             for text in texts:
                 options += [_flag_name(param), text]
 

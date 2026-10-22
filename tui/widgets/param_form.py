@@ -38,7 +38,13 @@ def hint(param: ParamSpec) -> str:
 
 class ParamForm(Vertical):
     class Changed(Message):
-        """Any field changed: the owner should rebuild the command line."""
+        """Any field changed: the owner should rebuild the command line. `form` is the
+        ParamForm and `name` the parameter whose field changed."""
+
+        def __init__(self, form: "ParamForm", name: str):
+            super().__init__()
+            self.form = form
+            self.name = name
 
     DEFAULT_CSS = """
     ParamForm { height: auto; }
@@ -105,17 +111,20 @@ class ParamForm(Vertical):
 
     # -- events -------------------------------------------------------------
 
+    def _announce(self, widget) -> None:
+        self.post_message(self.Changed(self, (widget.id or "")[len("param-"):]))
+
     def on_input_changed(self, event: Input.Changed) -> None:
         event.stop()
-        self.post_message(self.Changed())
+        self._announce(event.input)
 
     def on_select_changed(self, event: Select.Changed) -> None:
         event.stop()
-        self.post_message(self.Changed())
+        self._announce(event.select)
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         event.stop()
-        self.post_message(self.Changed())
+        self._announce(event.checkbox)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if not (event.button.id or "").startswith("browse-"):

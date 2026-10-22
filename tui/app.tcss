@@ -239,3 +239,24 @@ BookScreen #isbn-error {
     color: $error;
     height: auto;
 }
+
+PrintPrepScreen #pp-note {
+    padding: 0 2;
+    color: $text-muted;
+    height: auto;
+}
+
+PrintPrepScreen .size {
+    height: auto;
+    padding: 0 1;
+    color: $success;
+}
+
+PrintPrepScreen .pp-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+PrintPrepScreen .pp-actions Button {
+    margin-right: 1;
+}
