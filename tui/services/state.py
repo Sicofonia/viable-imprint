@@ -259,3 +259,33 @@ def calibration_counts(root: Path) -> list:
         key = (str(entry.get("agent_verdict")), str(entry.get("human_decision")))
         counts[key] = counts.get(key, 0) + 1
     return [CalibrationCount(v, d, n) for (v, d), n in sorted(counts.items())]
+
+
+# -- policy sync (T7.2) --------------------------------------------------------------------
+# The drift tripwire of ADR 013: a hash of the Editorial Policy section of docs/vsm.md, stored in
+# the S5 evaluation prompt. The path parameters exist so tests can use temporary copies.
+
+@dataclass
+class PolicyStatus:
+    in_sync: bool
+    stored: str = None
+    current: str = None
+    error: str = None       # why it could not be checked (vsm.md restructured, a file missing)
+
+    def sentence(self) -> str:
+        if self.error:
+            return f"Cannot check the policy prompt: {self.error}"
+        if self.in_sync:
+            return f"The policy prompt is in sync with docs/vsm.md (hash {self.current})."
+        return ("The policy prompt is OUT OF SYNC with docs/vsm.md: the Editorial Policy section has changed since the "
+                f"prompt was last synced. Stored hash {self.stored or '(none recorded)'}, current hash {self.current}.")
+
+
+def policy_status(vsm_path="docs/vsm.md", prompt_path="prompts/s5/policy_evaluation_task.txt") -> PolicyStatus:
+    from lib import policy_check
+    try:
+        current = policy_check.current_hash(str(vsm_path))
+        stored = policy_check.stored_hash(str(prompt_path))
+    except (OSError, ValueError) as exc:
+        return PolicyStatus(in_sync=False, error=str(exc))
+    return PolicyStatus(in_sync=stored == current, stored=stored, current=current)

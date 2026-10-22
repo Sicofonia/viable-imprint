@@ -13,6 +13,7 @@ from textual.widgets import Button, DataTable, Input, Select, Static
 from tui.screens.base import BaseScreen
 from tui.services import commands, estimate, files, state
 from tui.services.command_model import build_model
+from tui.services.command_notes import extra_confirmation
 from tui.services.files import open_path
 from tui.services.session import RunRequest
 from tui.widgets.command_hint import CommandHint
@@ -33,6 +34,12 @@ class CandidatesScreen(BaseScreen):
         self.rows: dict = {}          # slug -> state.CandidateRow
         self._specs: dict = {}
         self._pending: dict = {}      # id(request) -> follow-up for when that run ends
+        # The two files the policy check compares; tests point these at temporary copies.
+        self.policy_files: tuple = None
+
+    def _policy_files(self) -> tuple:
+        root = self.app.ctx.repo_root
+        return self.policy_files or (root / "docs" / "vsm.md", root / "prompts" / "s5" / "policy_evaluation_task.txt")
 
     @property
     def root(self):
@@ -41,6 +48,10 @@ class CandidatesScreen(BaseScreen):
     def compose_body(self) -> ComposeResult:
         with VerticalScroll(id="cand-scroll"):
             yield Static("", id="cand-policy", markup=False)
+            with Horizontal(id="cand-policy-actions", classes="cand-actions"):
+                yield Button("Open the prompt", id="policy-open-prompt")
+                yield Button("Open docs/vsm.md", id="policy-open-vsm")
+                yield RunButton("Mark as synced", id="policy-sync")
             yield Static(BRIEF_REMINDER, id="cand-reminder", markup=False)
             yield DataTable(id="cand-list", cursor_type="row", zebra_stripes=True)
             with Horizontal(classes="cand-actions"):
@@ -98,7 +109,37 @@ class CandidatesScreen(BaseScreen):
         calibration.clear()
         for c in state.calibration_counts(self.root):
             calibration.add_row(c.verdict, c.decision, str(c.count))
+        self._refresh_policy()
         self._update_actions()
+
+    # -- policy sync (T7.2) ----------------------------------------------------------------------
+
+    def _refresh_policy(self) -> None:
+        vsm, prompt = self._policy_files()
+        status = state.policy_status(vsm, prompt)
+        banner = self.query_one("#cand-policy", Static)
+        banner.update(status.sentence())
+        banner.set_class(not status.in_sync, "problem")
+        self.query_one("#cand-policy-actions").display = not status.in_sync
+        self.query_one("#policy-sync", RunButton).blocked_reason = (
+            "Fix the problem above first" if status.error else None)
+
+    @on(Button.Pressed, "#policy-open-prompt")
+    def _open_policy_prompt(self) -> None:
+        open_path(self._policy_files()[1])
+
+    @on(Button.Pressed, "#policy-open-vsm")
+    def _open_policy_vsm(self) -> None:
+        open_path(self._policy_files()[0])
+
+    @on(RunButton.Pressed, "#policy-sync")
+    def _mark_synced(self) -> None:
+        """Rewrite the stored hash (`s5 check-policy-sync --update`), after the Director confirms
+        that the prompt was reviewed against the policy. Never runs without that confirmation."""
+        spec = next(s for s in build_model(self.app.root) if s.path == ["s5", "check-policy-sync"])
+        argv = commands.argv_for(self.app.ctx, spec, {"do_update": True})
+        warning = extra_confirmation(spec, {"do_update": True})
+        self.app.begin_run(RunRequest("s5 check-policy-sync --update", argv, warnings=[warning], confirm=True))
 
     def selected(self):
         table = self.query_one("#cand-list", DataTable)

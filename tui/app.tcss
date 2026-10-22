@@ -368,10 +368,14 @@ CandidatesScreen #cand-reminder {
 }
 
 CandidatesScreen #cand-policy {
-    color: $warning;
-    text-style: bold;
+    color: $success;
     padding: 0 1;
     height: auto;
+}
+
+CandidatesScreen #cand-policy.problem {
+    color: $warning;
+    text-style: bold;
 }
 
 CandidatesScreen DataTable {
