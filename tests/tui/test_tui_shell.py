@@ -3,6 +3,7 @@ Needs Textual (skipped without it). Runs the real example-mode pipeline in
 subprocesses, on fake providers.
 """
 import asyncio
+import logging
 import sys
 import time
 import unittest
@@ -33,6 +34,8 @@ from tui.services.session import RunRequest  # noqa: E402
 from tui.widgets.run_button import RunButton  # noqa: E402
 
 SIZE = (120, 40)
+
+logging.getLogger("asyncio").setLevel(logging.ERROR)  # debug-mode slow-callback noise
 SLOW_SCRIPT = "import time\nprint('go', flush=True)\ntime.sleep(60)\n"
 
 

@@ -73,3 +73,64 @@ RunScreen, HelpScreen {
 #help-notes {
     margin-top: 1;
 }
+
+ExplorerScreen #explorer {
+    height: 1fr;
+}
+
+ExplorerScreen #explorer-left {
+    width: 45%;
+    padding: 0 1;
+}
+
+ExplorerScreen #commands {
+    height: 1fr;
+}
+
+ExplorerScreen #explorer-right {
+    width: 55%;
+    padding: 0 2;
+}
+
+ExplorerScreen #detail-title {
+    text-style: bold;
+    margin-top: 1;
+}
+
+ExplorerScreen #detail-help {
+    margin-bottom: 1;
+}
+
+ExplorerScreen #detail-warning {
+    color: $warning;
+    margin-bottom: 1;
+}
+
+ExplorerScreen #run {
+    margin-top: 1;
+}
+
+FilePickerScreen {
+    align: center middle;
+}
+
+#picker-dialog {
+    width: 80%;
+    height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#picker-title {
+    text-style: bold;
+}
+
+#picker-tree {
+    height: 1fr;
+}
+
+#picker-buttons {
+    height: auto;
+    align-horizontal: right;
+}
