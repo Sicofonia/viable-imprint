@@ -12,3 +12,9 @@ dependencies = [
     "feedparser>=6.0.12",
     "pikepdf>=10.13.0.post1",
 ]
+
+[project.optional-dependencies]
+# Terminal UI (ADR 023). Optional: the pipeline runs without it.
+tui = [
+    "textual>=0.80",
+]

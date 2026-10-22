@@ -134,6 +134,18 @@ def run_cli(ws: Workspace, *args, example: bool = False, timeout: float = 180) -
     return proc.returncode, output
 
 
+def root_group():
+    """`pipeline.cli`, imported with the repository root as working directory (the
+    manifest-driven groups are built at import time from relative paths)."""
+    previous = os.getcwd()
+    os.chdir(REPO_ROOT)
+    try:
+        import pipeline
+    finally:
+        os.chdir(previous)
+    return pipeline.cli
+
+
 def make_book(ws: Workspace, slug: str, *, source: bool = True) -> Path:
     """`init` through the CLI, then copy `tiny_source.txt` into `s1b/source/`."""
     code, output = run_cli(ws, "init", slug)

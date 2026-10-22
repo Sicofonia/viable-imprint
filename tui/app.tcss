@@ -1,0 +1,5 @@
+/* Stylesheet for the terminal UI (ADR 023). */
+
+HomeScreen #welcome {
+    padding: 1 2;
+}

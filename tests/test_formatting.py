@@ -82,7 +82,8 @@ class DashboardOutputUnchangedTests(GuardedCase):
             code, output = run_cli(ws, "s3", "dashboard", *args, example=True)
         self.assertEqual(code, 0, output)
         golden = fixture(f"dashboard_{name}.golden.txt").read_bytes().decode("utf-8")
-        self.assertEqual(output.replace("\r\n", "\n"), golden)
+        # Both sides normalised: a Windows checkout may give the golden file CRLF endings.
+        self.assertEqual(output.replace("\r\n", "\n"), golden.replace("\r\n", "\n"))
 
     def test_portfolio_view(self):
         self.assert_matches_golden("portfolio")

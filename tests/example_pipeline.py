@@ -32,4 +32,4 @@ httpx.get = _stub_get
 import pipeline  # noqa: E402
 
 if __name__ == "__main__":
-    pipeline.cli()
+    pipeline.main()

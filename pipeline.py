@@ -22,6 +22,7 @@ Output always lands under the VSM system that produced it (s1b/, s1d/, ...),
 mirroring this CLI's own nested command structure — only manifest.yaml stays
 at the book root, since it's shared across every system.
 """
+import os
 import re
 import sys
 from pathlib import Path
@@ -32,7 +33,7 @@ import yaml
 from dotenv import load_dotenv
 
 import pdf_bleed_tool
-from lib import candidates, dashboard, formatting, homeostat, manifest, orchestrator, paths, policy_check
+from lib import candidates, dashboard, formatting, homeostat, interrupt, manifest, orchestrator, paths, policy_check
 from lib import task_loader
 from lib.task_loader import build_system_group
 
@@ -602,8 +603,37 @@ cli.add_command(candidate)
 
 
 # ---------------------------------------------------------------------------
+# ui — the optional terminal UI (docs/adr/023-terminal-ui.md). Imports the
+# `tui` package lazily so the pipeline never needs Textual installed; this is
+# the one place outside tui/ and tests/ that names it. Removing the UI means
+# deleting tui/, tests/tui/, this command and the `tui` extra in pyproject.toml.
+# ---------------------------------------------------------------------------
+
+@cli.command(name="ui")
+@click.pass_context
+def ui(ctx):
+    """Open the terminal UI: menus for every command above, generated from this
+    CLI. Needs the optional extra: uv sync --extra tui"""
+    try:
+        import textual  # noqa: F401
+    except ImportError:
+        click.echo("Install the UI with: uv sync --extra tui", err=True)
+        sys.exit(1)
+    from tui.app import run_app
+    run_app(root=ctx.find_root().command, config_path=ctx.find_root().params["config"])
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main():
+    # Set only by the terminal UI for the runs it starts, so that cancelling one
+    # is recorded in the ledger as a failed attempt (ADR 023, Decision 6).
+    if os.environ.get(interrupt.ENV_VAR):
+        interrupt.install_graceful_break()
     cli()
+
+
+if __name__ == "__main__":
+    main()

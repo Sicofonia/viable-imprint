@@ -526,6 +526,19 @@ This drives `newsletter-scan` → `newsletter` → `newsletter-track` in order a
 
 ---
 
+## Using the UI
+
+An optional terminal UI (ADR 023) puts menus over every command below, so you pick a book instead of typing a path. It is a foreground program you open and close; it never runs anything on its own, and the pipeline works exactly as before without it.
+
+```bash
+uv sync --extra tui          # once; installs Textual (re-run it after any plain `uv sync`, which removes it)
+uv run python pipeline.py ui
+```
+
+Launch it from the repository root, optionally with `--config` like any other command (`uv run python pipeline.py --config other.yaml ui`). `q` quits.
+
+---
+
 ## Tests
 
 ```bash
