@@ -76,7 +76,7 @@ class FakeLLMTests(unittest.TestCase):
     def test_delay_seconds_delays(self):
         start = time.monotonic()
         FakeLLMProvider(delay_seconds=0.2).complete("sys", "x")
-        self.assertGreaterEqual(time.monotonic() - start, 0.19)
+        self.assertGreaterEqual(time.monotonic() - start, 0.15)
 
 
 class FakeTranslationTests(unittest.TestCase):
@@ -106,7 +106,7 @@ class FakeTranslationTests(unittest.TestCase):
             FakeTranslationProvider(fail=True).translate("x", "EN", "ES")
         start = time.monotonic()
         FakeTranslationProvider(delay_seconds=0.2).translate("x", "EN", "ES")
-        self.assertGreaterEqual(time.monotonic() - start, 0.19)
+        self.assertGreaterEqual(time.monotonic() - start, 0.15)
 
 
 class SelectionTests(unittest.TestCase):

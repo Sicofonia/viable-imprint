@@ -1,0 +1,14 @@
+# Fixture facts for the test harness (shape of templates/marketing_metadata.example.yaml).
+book_facts:
+  - label: "Author"
+    value: "A. Fixture Author"
+  - label: "ISBN"
+    value: "9781234567897"
+  - label: "Format"
+    value: "6 x 9 in"
+
+contact_facts:
+  - label: "Contact"
+    value: "Test Contact"
+  - label: "Email"
+    value: "contact@example.invalid"

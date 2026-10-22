@@ -1,0 +1,7 @@
+# One feed, no Gutenberg catalog, no catalog pages. The URL is never
+# contacted: tests stub httpx.get and serve tiny_feed.xml instead.
+feeds:
+  - name: tiny-feed
+    label: "Tiny test feed"
+    feed_url: https://example.invalid/feed.xml
+    language: en
