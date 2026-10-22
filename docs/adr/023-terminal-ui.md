@@ -65,7 +65,7 @@ Before running anything whose engine calls an LLM or translation provider (`llm_
 
 ### 6. Cancelling a run
 
-Cancel first sends an interrupt the child Python process sees as `KeyboardInterrupt` (SIGINT on macOS/Linux; on Windows the child is started in a new process group and sent `CTRL_BREAK_EVENT`, with the child-side handling confirmed in T0.1), waits up to 10 seconds, then terminates. With a graceful interrupt, `_run_recorded()` records the task as `failed`, which is already retry-eligible. After a forced kill, the ledger is unchanged and the UI says so. For an eTranslation run, the confirmation dialog notes that re-running resumes the in-flight request (ADR 022, Decision 6).
+Cancel first sends an interrupt the child Python process sees as `KeyboardInterrupt` (SIGINT on macOS/Linux; on Windows the child is started in a new process group and sent `CTRL_BREAK_EVENT`), waits up to 10 seconds, then terminates. **Windows needs child-side help, confirmed in T0.1:** `CTRL_BREAK_EVENT` alone kills the child without any Python exception, and `signal.signal(SIGBREAK, ...)` alone does not interrupt a blocking `time.sleep()`. The runner therefore sets `VIABLE_IMPRINT_GRACEFUL_BREAK=1` in the child's environment, and `pipeline.py`'s `__main__` block calls `lib/interrupt.install_graceful_break()` when that variable is set; it registers a console control handler that raises `KeyboardInterrupt` in the main thread, the same as Ctrl+C would (see Verification notes, item 3). With a graceful interrupt, `_run_recorded()` records the task as `failed`, which is already retry-eligible. After a forced kill, the ledger is unchanged and the UI says so. For an eTranslation run, the confirmation dialog notes that re-running resumes the in-flight request (ADR 022, Decision 6).
 
 ### 7. Outputs open externally
 
@@ -567,8 +567,81 @@ Phases are in order; each depends on the previous one. Within a phase, tasks are
 2. Smoke script: is a $0.10 ceiling right, and should `full` include translation by default given eTranslation's wait?
 3. Candidate briefs and newsletter notes open in an external editor (proposed). Would you rather type them in a text box inside the UI?
 
+**Answers (2026-10-22):**
+
+1. Windows only. Tests and manual checks target Windows; the code stays portable (`click.launch`, SIGINT branch in the runner) but macOS and Linux are not exercised.
+2. The ceiling is **$0.10** (`PIPELINE_LIVE_MAX_USD` default, as written). The `full` scope **skips translation by default**: T8.2's `--skip-translate` becomes the default behaviour of `full`, and a `--with-translate` flag opts in (it keeps the "expected wait" preview).
+3. Candidate briefs and newsletter notes open in the operator's **external editor** (`click.launch`). No in-UI text box.
+
 ---
 
 ## Verification notes
 
-*(Filled in by T0.1.)*
+*Filled in by T0.1 on 2026-10-22. Environment: Windows 10, `uv` 0.11.25, `uv run` interpreter Python 3.12.13 (the system `python` is 3.14, outside `requires-python`), Click 8.4.2, baseline `unittest discover -s tests`: 90 tests passing.*
+
+### "Facts checked in the code"
+
+All confirmed by reading the code, with these corrections and additions:
+
+- **Command count.** The Click tree has **41 leaf commands** (10 top-level entries): `book set-isbn`, `candidate new|record-decision`, `init`, `s1b` ×5, `s1c` ×3, `s1d` ×12 (including the three newsletter stages and `article-draft`), `s2 run|status` plus `s2 homeostat run|status` and `s2 newsletter run|status`, `s3 dashboard|sales-ingest`, `s4` ×3, `s5` ×6 (`evaluate`, `log-decision`, `check-policy-sync`, and the homeostat trio).
+- **`s3 sales-ingest` is registered twice** (manifest-driven, then overridden by the hand-written command with `book_slug csv_file`). The tree therefore holds only the hand-written one; the explorer needs no special case.
+- **The operator's local `config.yaml` selects Mistral** (`mistral-medium-latest`), not the example's Z.ai; eTranslation is configured with a real `receiver_url`. The "configured defaults" fact describes `config.example.yaml`. Nothing in the UI assumes either provider.
+- **`s1b format` does not use LibreOffice.** `engines/odt_format.py` writes the `.odt` with `odfpy` (pure Python). It needs only `templates/format_styles.yaml` and the `.odt` template it names, both personal and gitignored. LibreOffice is needed only for the manual PDF export before S1C. Consequences: the "LibreOffice tier" in T0.4 is really a "personal template present" tier, and Health (T8.1) reports LibreOffice as informational, not as something that would make a run fail. `s2 run --only s1b` on the operator's machine therefore completes `format` too.
+- **Fake provider and `llm.model`.** `get_llm_provider` rejects a config with no `llm.model` before dispatching on the provider. The `fake` provider keeps that check (the test config sets `model: fake-1`). `_resolve_default_max_chars` already falls back to 8000 for any provider that is neither `z-ai` nor `mistral` and declares no `limits.max_output_tokens`, so no change is needed for `fake`.
+
+### 1. Side effects of `import pipeline`
+
+Beyond `load_dotenv()` and command registration there are three:
+
+1. `import pdf_bleed_tool` (pikepdf import only, no work at import time).
+2. `build_system_group()` imports every engine module named in the manifests (`deepl`, `feedparser`, `httpx` load transitively) and reads `systems/<name>/tasks.yaml` **relative to the current directory**.
+3. **Silent failure outside the repository root.** `load_system_tasks()` returns `[]` when the manifest file is missing, so importing `pipeline` from another directory produces a Click tree where `s1b`, `s1d` and `s4` have **zero commands** and `s3`/`s5` lose their generated ones, with no error (verified from a scratch directory). `services/context.py` must therefore `chdir` to the repository root before the tree is built or any `lib/` function is called, and tests must run with the repository root as working directory (already a rule above). `pipeline.py ui` runs after import, so it receives a correct tree when launched from the repository root; the guard covers other launch directories for everything done afterwards.
+
+Nothing else touches disk or the network at import time.
+
+### 2. Direct invocation of `s5 homeostat-scan` and `s1d newsletter-scan`
+
+**Confirmed by reading `_build_command`.** Both engines declare `CLI_ARG = "none"`, so the generated callback uses `paths.intelligence_root(config)` as root. Run directly, `s5 homeostat-scan` writes `intelligence/s5/homeostat-scan/<date>/combined.txt` and updates `intelligence/manifest.yaml`, and reads the decision log from `intelligence/decisions.yaml` (which does not exist), instead of using `homeostat/`. `s1d newsletter-scan` likewise looks for `notes/YYYY-MM.txt` and the featured lists under `intelligence/` instead of `newsletter/`. The chains (`s2 homeostat run`, `s2 newsletter run`) pass the correct root. T0.4 pins this behaviour with a test so a future fix is noticed. Not fixed here.
+
+The other four stage commands (`s5 homeostat`, `s5 homeostat-render`, `s1d newsletter`, `s1d newsletter-track`) take a file and resolve the root by walking up to `manifest.yaml`, so they work when handed a file inside `homeostat/` or `newsletter/`. The explorer still warns on all six, as written in T1.5: they are stages of a chain, and running one alone skips the others.
+
+### 3. Windows: `CTRL_BREAK_EVENT` against a child in a new process group
+
+Tested with an `asyncio.create_subprocess_exec(..., creationflags=CREATE_NEW_PROCESS_GROUP)` parent and `send_signal(CTRL_BREAK_EVENT)`:
+
+| Child | Result |
+|---|---|
+| plain `time.sleep(30)` inside `try/except KeyboardInterrupt` | Child dies at once, exit code `0xC000013A`. **No `KeyboardInterrupt`**, so `_run_recorded()` would record nothing. |
+| `signal.signal(signal.SIGBREAK, signal.default_int_handler)` (the one-liner this ADR first proposed) | Still running after 8 seconds. Python only wakes a blocking `time.sleep()` for SIGINT, not SIGBREAK, so the interrupt waits until the sleep ends. For eTranslation (30-second polls) that is longer than the 10-second grace. Rejected. |
+| `SetConsoleCtrlHandler` callback (via `ctypes`) calling `_thread.interrupt_main()` | Works only when the main thread executes bytecode (a loop of short sleeps: `KeyboardInterrupt` after 0.3 s). A single long `time.sleep()` is not woken. |
+| Same callback, plus `SetEvent` on the interpreter's own SIGINT event (`ctypes.pythonapi._PyOS_SigintEvent()`) | **`KeyboardInterrupt` immediately, even inside `time.sleep(30)`.** This is what a real Ctrl+C does. |
+
+**Decision.** `lib/interrupt.py` (pipeline side, not in `tui/`) provides `install_graceful_break()`: on Windows it registers that console handler (using the private `_PyOS_SigintEvent` only inside a `try`, falling back to `interrupt_main()` alone); on other platforms it does nothing, because SIGINT already raises `KeyboardInterrupt`. `pipeline.py`'s `__main__` block calls it only when `VIABLE_IMPRINT_GRACEFUL_BREAK` is set, so normal terminal use is unchanged. Click turns the `KeyboardInterrupt` into `Aborted!` with exit code 1 after `_run_recorded()` has written the `failed` entry. Like Ctrl+C in a terminal, a blocking socket read is not interrupted until it returns or times out; the 10-second grace then ends in a terminate and an unchanged ledger, which the UI reports. T1.3's integration test asserts the `failed` ledger entry on Windows.
+
+### 4. CSV headers the sales providers match
+
+- **IngramSpark** (`providers/sales/ingramspark.py`): detected when the header contains `ISBN13` and `Total Comp`. Parsed columns: `ISBN13`, `Net Quantity`, `Total Comp`, `Currency`, `Comp Period Start Date`, `Comp Period End Date`. One row per ISBN and period.
+- **KDP** (`providers/sales/kdp.py`): detected when the header contains `ASIN/ISBN`, `Royalty` and `Marketplace`. Parsed columns: `ASIN/ISBN`, `Net Units Sold` (or `Units Sold`), `Royalty`, `Currency`, `Royalty Date` (or `Transaction Date`). Transaction-level rows, aggregated per ISBN and currency.
+
+The fixtures use exactly these headers. The file docstring still warns they are best-effort, not verified against live exports.
+
+### 5. `uv sync --extra tui`
+
+Works with the current layout. Verified in a scratch copy: adding `[project.optional-dependencies] tui = ["textual>=0.80"]` to `pyproject.toml` and running `uv lock` adds Textual 8.2.8 plus `rich`, `markdown-it-py`, `mdurl`, `pygments`, `platformdirs`; `uv sync --extra tui` installs them. `uv run` keeps already-installed extras (inexact sync), while a plain `uv sync` removes them, so the README tells the operator to run `uv sync --extra tui` once and to re-run it after any plain `uv sync`.
+
+### 6. Test layout: `tests/tui/` collides with `tui/`
+
+`unittest discover -s tests` makes `tests/` the top-level directory, so a package `tests/tui/` with an `__init__.py` would be imported as the top-level module `tui`, shadowing the real `tui/` package. Without an `__init__.py` discovery skips the folder silently. **Resolution:** `tests/tui/` has no `__init__.py`, its modules are named `test_tui_*.py` (unique across `tests/`), and `tests/test_tui_suite.py` loads them through the `load_tests` protocol with `tests/tui/` as its own top level. The documented command `uv run python -m unittest discover -s tests` is unchanged. Test modules that need Textual skip themselves when it is not installed; service tests (no Textual import) always run.
+
+### Tasks corrected as a result
+
+- **T0.3 / T0.4:** the "LibreOffice" tier is a personal-template tier (see "`s1b format` does not use LibreOffice" above); a harness helper patches the manifest loader so periodic chains and `run_book` can run in-process against example prompts on a clean clone.
+- **T1.1:** adds `lib/interrupt.py` and the `pipeline.py` `__main__` hook (Decision 6), plus the test-layout shim.
+- **T1.3:** the Windows cancel test asserts a `failed` ledger entry (mechanism confirmed).
+- **T8.1:** LibreOffice is informational.
+
+---
+
+## Implementation notes
+
+*(Appended per task as each one is completed.)*
