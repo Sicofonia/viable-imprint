@@ -526,6 +526,16 @@ This drives `newsletter-scan` → `newsletter` → `newsletter-track` in order a
 
 ---
 
+## Tests
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+Every automated test runs offline against **fake providers** (`llm.provider: fake` and `translation.provider: fake`, ADR 023): no network, no API key, no quota. The fakes exist for tests only — they return deterministic placeholder text that satisfies the structural contracts the code parses (`<overview>`, `<explorer>`, `<dish>`, `<verdict>`), not anything resembling real output. Don't set them in your real `config.yaml`.
+
+---
+
 ## Licence
 
 MIT
