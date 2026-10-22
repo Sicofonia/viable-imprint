@@ -134,3 +134,54 @@ FilePickerScreen {
     height: auto;
     align-horizontal: right;
 }
+
+HomeScreen #books-empty {
+    padding: 0 2;
+    color: $text-muted;
+}
+
+HomeScreen #books {
+    margin: 0 2 1 2;
+    height: auto;
+    max-height: 16;
+}
+
+NewBookScreen {
+    align: center middle;
+}
+
+#newbook-dialog {
+    width: 80%;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#newbook-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#nb-source-row {
+    height: auto;
+}
+
+#nb-source-row Input {
+    width: 1fr;
+}
+
+#nb-error {
+    color: $error;
+    height: auto;
+}
+
+#nb-buttons {
+    height: auto;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+#nb-buttons Button {
+    margin-left: 1;
+}

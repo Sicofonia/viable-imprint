@@ -693,3 +693,11 @@ Textual's `DOMNode` has private members of its own (`_attach`, ...); a private h
 - A missing required value is reported in the hint as "Cannot run yet: Missing required argument: INPUT_FILE" and nothing starts.
 - Findings while building it: in Textual 8, `Select.BLANK` is just `False`; the "nothing chosen" sentinel is `Select.NULL` (`param_form.NO_SELECTION` papers over the rename). The file picker must focus its tree on open, or Enter re-submits the folder box instead of choosing the file (the Browse test caught it).
 - Manifest-driven commands have no help text (T1.2 note), so their rows show only the name and the detail panel says "(this command has no description)".
+
+### Phase 2 — Book production (S1B, S1D, S2)
+
+**T2.1 — Books list and new book.** The home screen shows every book under `books_dir` (tasks done/total, failed, stale, ISBN or "not set", last activity), newest activity first; `Enter` on a row opens the book, `n` starts a new one. The counts come from `orchestrator.book_status` through `services/state.py`, so they equal `s2 status` by construction (a test compares them). "Last activity" is the latest `completed_at` / `attempted_at` in the ledger, or the manifest's modification time for a book that has never run. With no books the table is hidden and the menu has focus.
+- *New book* (`screens/new_book.py`): name validated by `files.slug_problem` (lowercase letters, digits, single hyphens; must not exist), manuscript by `files.source_problem` (an existing `.txt`). Create dismisses the form and runs `init <slug>` through the run modal; when that run ends, `RunRequest.on_done` (new in this task) calls `finish_new_book`, which copies the manuscript into `s1b/source/` (`files.copy_source`, which refuses if a file is already there) and opens the book. A failed `init` copies nothing and leaves the log on screen. The resulting `manifest.yaml` is byte-for-byte what `init` writes (a test checks it).
+- Accepting only `.txt` is a decision, following the ADR's wording ("source `.txt`"); the pipeline reads UTF-8 text.
+- On success the run log is replaced by the book screen (the app pops modals when navigating); `init` output is two lines and the notification keeps its summary.
+- `BookScreen` is a stub until T2.2.

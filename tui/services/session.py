@@ -19,6 +19,7 @@ class RunRequest:
     estimate: object = None                    # services.estimate.Estimate, or None
     warnings: list = field(default_factory=list)   # shown before running, e.g. "this overwrites ..."
     confirm: bool = False                      # ask even when there is no estimate (e.g. --update)
+    on_done: Callable = None                   # called with the RunResult when the run ends, however it ended
 
     @property
     def needs_confirmation(self) -> bool:
