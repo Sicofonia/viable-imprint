@@ -57,6 +57,7 @@ class BookScreen(BaseScreen):
                 with Horizontal(id="book-actions"):
                     yield Button("Open book folder", id="open-book-folder")
                     yield Button("Open manifest.yaml", id="open-manifest")
+                    yield RunButton("Mark as done", id="toggle-done")
                 with Horizontal(id="isbn-row"):
                     yield Input(id="isbn", placeholder="ISBN-10 or ISBN-13")
                     yield RunButton("Set ISBN", id="set-isbn")
@@ -94,8 +95,11 @@ class BookScreen(BaseScreen):
         if table.row_count:
             table.move_cursor(row=min(previous, table.row_count - 1))
         info = state.book_row(self.root)
+        self.query_one("#toggle-done", RunButton).label = "Reopen" if info.done_on else "Mark as done"
         self.query_one("#book-title", Static).update(
-            f"{self.slug}   ISBN: {info.isbn or 'not set'}   {info.done}/{info.tasks_total} done"
+            f"{f'{state.DONE_MARK} ' if info.done_on else ''}{self.slug}"
+            f"{f' (done {info.done_on})' if info.done_on else ''}   ISBN: {info.isbn or 'not set'}   "
+            f"{info.done}/{info.tasks_total} done"
             f"{f', {info.failed} failed' if info.failed else ''}{f', {info.stale} stale' if info.stale else ''}"
             f"   {self.root}")
         self.call_later(self._show_selected)
@@ -276,3 +280,19 @@ class BookScreen(BaseScreen):
             warnings.append(f"This book already has the ISBN {isbn}; running this changes nothing.")
         argv = commands.argv_for(self.app.ctx, self._set_isbn_spec(), {"book_slug": self.slug, "isbn": isbn})
         self.app.begin_run(RunRequest(f"book set-isbn {self.slug}", argv, warnings=warnings))
+
+    @on(RunButton.Pressed, "#toggle-done")
+    def _toggle_done(self) -> None:
+        """Mark the book done, or reopen it. Both are CLI commands (`book done`, `book reopen`), run through the
+        run modal like everything else the UI changes."""
+        info = state.book_row(self.root)
+        command = "reopen" if info.done_on else "done"
+        spec = next(s for s in build_model(self.app.root) if s.path == ["book", command])
+        argv = commands.argv_for(self.app.ctx, spec, {"book_slug": self.slug})
+        warnings = []
+        if command == "done":
+            unfinished = info.tasks_total - info.done
+            if unfinished:
+                warnings.append(f"{unfinished} of this book's {info.tasks_total} tasks are not done. Marking it done only "
+                                "changes how it is listed; nothing is deleted and you can reopen it.")
+        self.app.begin_run(RunRequest(f"book {command} {self.slug}", argv, warnings=warnings))

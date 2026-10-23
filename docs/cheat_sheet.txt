@@ -10,6 +10,9 @@ GENERAL / SETUP
 ------------------------------------------------------------
 init <slug>                          create a new book project
 book set-isbn <slug> <isbn>          record ISBN (needed before sales-ingest)
+book list                            every book: in progress first, finished ones last
+book done <slug>                     mark a finished book (still on disk and in the dashboard)
+book reopen <slug>                   undo `book done`
 candidate new <slug>                 create a candidate brief folder
 
 ------------------------------------------------------------

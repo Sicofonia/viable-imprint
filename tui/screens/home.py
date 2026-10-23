@@ -1,4 +1,5 @@
 """Entry screen: every book (newest activity first) and a shortcut to every other screen."""
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, OptionList, Static
@@ -34,9 +35,13 @@ class HomeScreen(BaseScreen):
         table.clear()
         books = state.list_books(self.app.ctx)
         for b in books:
-            table.add_row(b.slug, f"{b.done}/{b.tasks_total}", str(b.failed) if b.failed else "-",
-                          str(b.stale) if b.stale else "-", b.isbn or "not set", state.format_activity(b.last_activity),
-                          key=b.slug)
+            cells = [b.slug, f"{b.done}/{b.tasks_total}", str(b.failed) if b.failed else "-",
+                     str(b.stale) if b.stale else "-", b.isbn or "not set", state.format_activity(b.last_activity)]
+            if b.done_on:
+                # A finished book goes after the ones in progress, with a green [x], the rest dimmed.
+                cells = [Text.assemble((f"{state.DONE_MARK} ", "bold green"), (b.slug, "dim")),
+                         *[Text(c, style="dim") for c in cells[1:5]], Text(f"done {b.done_on}", style="dim")]
+            table.add_row(*cells, key=b.slug)
         empty = self.query_one("#books-empty", Static)
         empty.update("" if books else "No books yet. Press n to start one.")
         empty.display = not books

@@ -41,7 +41,7 @@ class ModelTests(unittest.TestCase):
 
     def test_command_paths_equal_what_click_reports(self):
         self.assertEqual({tuple(s.path) for s in self.model.values()}, click_leaf_paths(self.root))
-        self.assertEqual(len(self.model), 42)  # 41 pipeline commands + `ui`
+        self.assertEqual(len(self.model), 45)  # 41 pipeline commands + `ui` + `book done`, `reopen`, `list`
 
     def test_nested_groups_are_flattened_into_the_path(self):
         self.assertEqual(self.model["s2 homeostat run"].path, ["s2", "homeostat", "run"])

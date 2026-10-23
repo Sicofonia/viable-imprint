@@ -33,7 +33,7 @@ import yaml
 from dotenv import load_dotenv
 
 import pdf_bleed_tool
-from lib import candidates, dashboard, formatting, homeostat, interrupt, manifest, orchestrator, paths, policy_check
+from lib import books, candidates, dashboard, formatting, homeostat, interrupt, manifest, orchestrator, paths, policy_check
 from lib import task_loader
 from lib.task_loader import build_system_group
 
@@ -110,7 +110,7 @@ def init(ctx, book_slug):
 # form, human-facing marketing copy) or a hand-edit to manifest.yaml.
 # ---------------------------------------------------------------------------
 
-@click.group(name="book", help="Per-book facts and bootstrap commands")
+@click.group(name="book", help="Per-book facts, status and bootstrap commands")
 def book():
     pass
 
@@ -125,6 +125,67 @@ def book_set_isbn(ctx, book_slug, isbn):
     root = _resolve_book_root(ctx.obj["config"], book_slug)
     manifest.update(root, isbn=isbn)
     click.echo(f"Recorded ISBN {isbn} for {book_slug}")
+
+
+@book.command(name="done")
+@click.argument("book_slug")
+@click.pass_context
+def book_done(ctx, book_slug):
+    """Mark a book as finished. It stays on disk and in the dashboard and sales
+    figures; lists (`book list`, the UI) just show it after the books in progress.
+    `book reopen` undoes it."""
+    root = _resolve_book_root(ctx.obj["config"], book_slug)
+    changed, when = books.mark_done(root)
+    if not changed:
+        click.echo(f"{book_slug} was already marked as done on {when}.")
+        return
+    rows = orchestrator.book_status(root)
+    finished = sum(1 for r in rows if r["status"] == "done")
+    click.echo(f"Marked {book_slug} as done ({when}).")
+    if finished < len(rows):
+        click.echo(f"  Note: only {finished} of its {len(rows)} tasks are done.")
+
+
+@book.command(name="reopen")
+@click.argument("book_slug")
+@click.pass_context
+def book_reopen(ctx, book_slug):
+    """Take the done mark off a book, so it is listed among the books in progress again."""
+    root = _resolve_book_root(ctx.obj["config"], book_slug)
+    if books.reopen(root):
+        click.echo(f"Reopened {book_slug}.")
+    else:
+        click.echo(f"{book_slug} was not marked as done.")
+
+
+@book.command(name="list")
+@click.pass_context
+def book_list(ctx):
+    """List every book: those in progress first (most recently active first), then those marked done."""
+    books_dir = Path(ctx.obj["config"].get("books_dir", "books"))
+    roots = [p for p in sorted(books_dir.iterdir()) if p.is_dir() and (p / "manifest.yaml").exists()]         if books_dir.is_dir() else []
+    if not roots:
+        click.echo(f"No books found under {books_dir}/")
+        return
+    rows = []
+    for root in roots:
+        data = manifest.load(root)
+        statuses = [r["status"] for r in orchestrator.book_status(root)]
+        finished = data.get(books.DONE_KEY)
+        if finished:
+            state_text = f"[x] done {finished}"
+        elif statuses.count("done") == len(statuses):
+            state_text = "all tasks done (not marked: `book done`)"
+        elif statuses.count("done") or "failed" in statuses or "stale" in statuses:
+            state_text = "in progress"
+        else:
+            state_text = "not started"
+        rows.append({"slug": root.name, "tasks": f"{statuses.count('done')}/{len(statuses)}",
+                     "isbn": data.get("isbn") or "-", "state": state_text, "done": finished,
+                     "activity": books.last_activity(root, data.get("tasks", {}))})
+    click.echo(f"{'Book':<28}  {'Tasks':<8}  {'ISBN':<15}  Status")
+    for row in books.order(rows, lambda r: r["done"], lambda r: r["activity"]):
+        click.echo(f"{row['slug']:<28}  {row['tasks']:<8}  {row['isbn']:<15}  {row['state']}")
 
 
 cli.add_command(book)
@@ -286,6 +347,9 @@ def s2_status(ctx, book_slug):
     """Show every book-scoped task's status: done, stale, ready, blocked, or failed."""
     root = _resolve_book_root(ctx.obj["config"], book_slug)
     click.echo(f"Book: {book_slug} ({root})")
+    finished = books.done_on(root)
+    if finished:
+        click.echo(f"Marked as done on {finished}.")
 
     current_system = None
     for row in orchestrator.book_status(root):
