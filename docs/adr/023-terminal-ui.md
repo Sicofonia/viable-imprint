@@ -39,7 +39,7 @@ This ADR relaxes the project's "command line only" stance. It does **not** relax
 
 The UI lives in this repository as a self-contained `tui/` package. Textual is an optional extra (`uv sync --extra tui`). A new `pipeline.py ui` command imports `tui` lazily; without Textual it prints the install command and exits non-zero. The pipeline keeps working, unchanged, without Textual.
 
-**Removal procedure** (every task keeps this true): delete `tui/` and `tests/tui/`, remove the `ui` command from `pipeline.py`, remove the `tui` extra from `pyproject.toml`. No module outside `tui/` and `tests/tui/` may import `tui`. The fake providers, the test harness and `lib/formatting.py` from Phase 0 stay, because they are useful without the UI.
+**Removal procedure** (every task keeps this true): delete `tui/`, `tests/tui/`, `tests/live/` and `tests/test_live_smoke.py` (the smoke script builds its commands with `tui/services/commands.py`), remove the `ui` command from `pipeline.py`, remove the `tui` extra from `pyproject.toml`. No module outside `tui/` and `tests/tui/` may import `tui`. The fake providers, the test harness and `lib/formatting.py` from Phase 0 stay, because they are useful without the UI.
 
 ### 2. Read in-process, change state only through the CLI
 
@@ -793,3 +793,28 @@ Found by the full suite (not by the books tests run alone — it is timing-depen
 - **Data folders**: a missing one is a warning (each is created when first needed).
 - The table of which variables each provider needs is the one place this duplicates knowledge from `providers/__init__.py`; two tests read that file and fail if a provider or variable is added there and not here.
 - Run against the operator's real configuration on this machine, all 24 checks are OK; that is also a test, skipped (naming the missing file) where personal files are absent.
+
+**T8.2 — Live smoke script.** `tests/live/smoke.py`, run only by hand (not named `test_*`, so discovery never collects it):
+
+```
+uv run python tests/live/smoke.py --scope core                    # 4 LLM calls
+uv run python tests/live/smoke.py --scope full                    # about 16 LLM calls, translation skipped
+uv run python tests/live/smoke.py --scope full --with-translate   # also one real translation request
+uv run python tests/live/smoke.py --scope core --dry-run          # print the plan, call nothing
+```
+
+Flags: `--yes` (skip the confirmation), `--clean` (delete the workspace at the end), `--dry-run`. Environment: `PIPELINE_LIVE_MAX_USD` (default 0.10, as you decided).
+- **What it does.** It reads your real `config.yaml` and `.env`, but points all five data folders at a temporary workspace (printed at the start and the end, kept for inspection unless `--clean`), so none of your books, candidates, intelligence, homeostat or newsletter data is read or written. It makes the inputs a session would have (`init` plus the tiny manuscript, `candidate new` plus the tiny brief, and for `full` a finished scan and a one-line notes file), then runs each command built by `tui/services/commands.py`. `core` is `s1b cleanup`, `s1d brief` (on the cleaned text), `s1d synopsis`, `s5 evaluate`. `full` is `s2 run` on the tiny book, `s4 briefing` (from `tiny_combined_scan.txt`), `s4 content-strategy`, `s1d article-draft`, `s5 evaluate`, `s2 homeostat run`, `s2 newsletter run`.
+- **Call counts come from the manifests**, not from a constant: `full` is 16 LLM calls today (10 in the book chain, one each for the six other steps), not the ADR's "about 17"; a task added to a manifest changes the plan by itself and a test pins today's figure.
+- **Translation in `full` is skipped by default**, as you decided, by selecting the fake translation provider in the temporary config for that run, so the real `s2 run` chain still completes; `--with-translate` keeps the configured one and the preview states its expected wait (for eTranslation: asynchronous, minutes and up to two hours even for a paragraph, and a re-run resumes it).
+- **Before running** it prints the provider, model, planned calls, translation provider and wait, the ceiling, the workspace and the commands, then asks `Run it? [y/N]` unless `--yes`. It warns when the planned calls exceed 25% of a known free-tier quota (Google AI Studio's 20 requests a day, so `full` there is flagged at 80% and `core` at 20% is not). It refuses to start, naming the problem, if an input file exceeds 1,500 characters, if `llm.provider` or `llm.model` is unset, or if a credential the run needs is missing (checked with `services/health`; the translation credentials only matter with `--with-translate`).
+- **While running** it sums `cost_usd` across the workspace ledgers after each command and stops as soon as the total exceeds the ceiling (exit 3). **Every command has a time limit** (15 minutes; 2 hours 10 minutes for the chain when translation is on), after which it is killed and reported as failed, so the script cannot wait forever.
+- **It reports** a PASS or FAIL line per command with its duration, cost so far and, on failure, the error line; then the totals (commands passed, planned LLM calls for the commands that ran, duration, cost, workspace). In a book run where only `s1b.format` failed because its template is not installed on that machine, the command still passes, with a note. Per-command logs are in the workspace's `logs/` folder. Exit codes: 0 passed, 1 a command failed, 2 refused, 3 ceiling exceeded, 4 declined, 130 interrupted.
+- **Tests** (`tests/test_live_smoke.py`, 21): the script is driven end to end on fake providers through the example launcher with real subprocesses: `core` runs four commands with the UI's argv against the temporary config only; `full` runs all seven and leaves the briefing, content strategy, article draft, homeostat page, final newsletter and verdict in the workspace; plus the call-count plan for both scopes, the size refusal, the credential refusal, confirmation and `--yes`, the quota warning, `--dry-run` creating nothing, `--clean`, the ceiling stop (with a $0.0000001 ceiling it stops after the first step), a failing command exiting 1, and a command that outlives its limit being killed.
+- **Against your real config, as a dry run** (no API call, nothing created): `full` plans mistral / mistral-medium-latest, about 16 calls, translation skipped (`--with-translate` would use etranslation); `core` plans about 4.
+- **Not done: the live runs.** The ADR's last "done when" for T8.2 is one `core` and one `full` run on your machine with their call count, duration and cost recorded here. They spend real provider quota and send text to the provider, so they are left for you to run. Record them below.
+
+| Run | Date | Provider / model | Calls | Duration | Cost | Result |
+|---|---|---|---|---|---|---|
+| `--scope core` | | | | | | |
+| `--scope full` | | | | | | |

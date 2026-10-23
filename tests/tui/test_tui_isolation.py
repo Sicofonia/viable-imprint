@@ -42,7 +42,10 @@ class IsolationTests(unittest.TestCase):
         offenders = []
         for path in python_files(REPO_ROOT):
             rel = path.relative_to(REPO_ROOT)
-            if rel.parts[0] == "tui" or rel.parts[:2] == ("tests", "tui"):
+            # tests/live/smoke.py builds its commands with tui/services/commands.py (ADR 023, T8.2), so it
+            # and its test go when the UI goes; see the removal procedure in the ADR.
+            if (rel.parts[0] == "tui" or rel.parts[:2] in (("tests", "tui"), ("tests", "live"))
+                    or rel.as_posix() == "tests/test_live_smoke.py"):
                 continue
             for name, function in imported_modules(ast.parse(path.read_text(encoding="utf-8"))):
                 if is_tui(name) and not (rel.as_posix() == "pipeline.py" and function == "ui"):
