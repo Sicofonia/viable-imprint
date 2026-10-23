@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Tiny test feed</title>
+    <link>https://example.invalid/</link>
+    <description>Two items, written for the test harness.</description>
+    <item>
+      <title>New edition of a Central Asian travel classic announced</title>
+      <link>https://example.invalid/news/1</link>
+      <guid>https://example.invalid/news/1</guid>
+      <pubDate>Mon, 05 Oct 2026 09:00:00 GMT</pubDate>
+      <description>A small press has announced a new annotated edition of a nineteenth-century journey to Kashgar.</description>
+    </item>
+    <item>
+      <title>Public-domain scans: what libraries added this month</title>
+      <link>https://example.invalid/news/2</link>
+      <guid>https://example.invalid/news/2</guid>
+      <pubDate>Tue, 06 Oct 2026 09:00:00 GMT</pubDate>
+      <description>Several digital libraries added exploration narratives to their open collections.</description>
+    </item>
+  </channel>
+</rss>

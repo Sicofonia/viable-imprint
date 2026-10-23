@@ -1,0 +1,422 @@
+/* Stylesheet for the terminal UI (ADR 023). */
+
+HomeScreen #welcome {
+    padding: 1 2;
+    text-style: bold;
+}
+
+HomeScreen #menu {
+    margin: 0 2;
+    height: auto;
+    max-height: 20;
+}
+
+PlaceholderScreen #placeholder {
+    padding: 1 2;
+}
+
+RunScreen, HelpScreen {
+    align: center middle;
+}
+
+#run-dialog {
+    width: 90%;
+    height: 85%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#run-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#run-confirm {
+    height: 1fr;
+    padding: 1 0;
+}
+
+#run-log {
+    height: 1fr;
+    border: round $primary-darken-2;
+}
+
+#run-summary {
+    height: auto;
+    padding: 1 0;
+    text-style: bold;
+}
+
+#run-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+#run-buttons Button {
+    margin-left: 1;
+}
+
+#help-dialog {
+    width: 80;
+    height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#help-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#help-notes {
+    margin-top: 1;
+}
+
+ExplorerScreen #explorer {
+    height: 1fr;
+}
+
+ExplorerScreen #explorer-left {
+    width: 45%;
+    padding: 0 1;
+}
+
+ExplorerScreen #commands {
+    height: 1fr;
+}
+
+ExplorerScreen #explorer-right {
+    width: 55%;
+    padding: 0 2;
+}
+
+ExplorerScreen #detail-title {
+    text-style: bold;
+    margin-top: 1;
+}
+
+ExplorerScreen #detail-help {
+    margin-bottom: 1;
+}
+
+ExplorerScreen #detail-warning {
+    color: $warning;
+    margin-bottom: 1;
+}
+
+ExplorerScreen #run {
+    margin-top: 1;
+}
+
+FilePickerScreen {
+    align: center middle;
+}
+
+#picker-dialog {
+    width: 80%;
+    height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#picker-title {
+    text-style: bold;
+}
+
+#picker-tree {
+    height: 1fr;
+}
+
+#picker-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+HomeScreen #books-empty {
+    padding: 0 2;
+    color: $text-muted;
+}
+
+HomeScreen #books {
+    margin: 0 2 1 2;
+    height: auto;
+    max-height: 16;
+}
+
+NewBookScreen {
+    align: center middle;
+}
+
+#newbook-dialog {
+    width: 80%;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#newbook-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#nb-source-row {
+    height: auto;
+}
+
+#nb-source-row Input {
+    width: 1fr;
+}
+
+#nb-error {
+    color: $error;
+    height: auto;
+}
+
+#nb-buttons {
+    height: auto;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+#nb-buttons Button {
+    margin-left: 1;
+}
+
+BookScreen #book-title {
+    padding: 0 2;
+    text-style: bold;
+}
+
+BookScreen #book-main {
+    height: 1fr;
+}
+
+BookScreen #tasks {
+    width: 65%;
+}
+
+BookScreen #task-panel {
+    width: 35%;
+    padding: 0 2;
+}
+
+BookScreen #task-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+BookScreen #task-hint {
+    padding: 0;
+}
+
+BookScreen #pipeline-title {
+    text-style: bold;
+    margin-top: 2;
+}
+
+BookScreen #pipeline-hint {
+    padding: 0;
+}
+
+BookScreen #book-actions-title {
+    text-style: bold;
+    margin-top: 2;
+}
+
+BookScreen #isbn-row {
+    height: auto;
+}
+
+BookScreen #isbn-row Input {
+    width: 1fr;
+}
+
+BookScreen #isbn-error {
+    color: $error;
+    height: auto;
+}
+
+PrintPrepScreen #pp-note {
+    padding: 0 2;
+    color: $text-muted;
+    height: auto;
+}
+
+PrintPrepScreen .size {
+    height: auto;
+    padding: 0 1;
+    color: $success;
+}
+
+PrintPrepScreen .pp-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+PrintPrepScreen .pp-actions Button {
+    margin-right: 1;
+}
+
+PerformanceScreen #portfolio {
+    height: auto;
+    max-height: 12;
+}
+
+PerformanceScreen #book-tasks {
+    height: auto;
+    max-height: 12;
+}
+
+PerformanceScreen #portfolio-flags {
+    color: $warning;
+}
+
+PerformanceScreen #margin-note {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+PerformanceScreen #book-title, PerformanceScreen #sales-title {
+    text-style: bold;
+    margin-top: 1;
+}
+
+PerformanceScreen #sales-help {
+    color: $text-muted;
+}
+
+PerformanceScreen #ingest-csv-row {
+    height: auto;
+}
+
+PerformanceScreen #ingest-csv-row Input {
+    width: 1fr;
+}
+
+PerformanceScreen #ingest-actions {
+    height: auto;
+}
+
+PerformanceScreen #ingest-actions Button {
+    margin-right: 1;
+}
+
+PerformanceScreen #ingest-receipt {
+    margin-top: 1;
+}
+
+IntelligenceScreen #last-scan {
+    text-style: bold;
+    padding: 0 1;
+}
+
+IntelligenceScreen .stage-heading {
+    text-style: bold;
+    margin-top: 1;
+}
+
+IntelligenceScreen DataTable {
+    height: auto;
+    max-height: 8;
+}
+
+IntelligenceScreen .stage-actions {
+    height: auto;
+}
+
+IntelligenceScreen .stage-actions Button {
+    margin-right: 1;
+}
+
+PeriodicScreen #hs-reads {
+    padding: 0 1;
+    color: $text-muted;
+}
+
+PeriodicScreen .section {
+    text-style: bold;
+    margin-top: 1;
+}
+
+PeriodicScreen .periodic-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+PeriodicScreen .periodic-actions Button {
+    margin-right: 1;
+}
+
+PeriodicScreen #hs-status, PeriodicScreen #hs-decisions {
+    height: auto;
+    max-height: 10;
+}
+
+PeriodicScreen #hs-log-error {
+    color: $error;
+    height: auto;
+}
+
+CandidatesScreen #cand-reminder {
+    color: $text-muted;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+CandidatesScreen #cand-policy {
+    color: $success;
+    padding: 0 1;
+    height: auto;
+}
+
+CandidatesScreen #cand-policy.problem {
+    color: $warning;
+    text-style: bold;
+}
+
+CandidatesScreen DataTable {
+    height: auto;
+    max-height: 12;
+}
+
+CandidatesScreen .section {
+    text-style: bold;
+    margin-top: 1;
+}
+
+CandidatesScreen .cand-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+CandidatesScreen .cand-actions Button, CandidatesScreen .cand-actions Select {
+    margin-right: 1;
+}
+
+CandidatesScreen .cand-actions Input {
+    width: 1fr;
+    margin-right: 1;
+}
+
+CandidatesScreen #cand-decision-error, CandidatesScreen #cand-new-error {
+    color: $error;
+    height: auto;
+}
+
+HealthScreen #health-summary {
+    text-style: bold;
+    padding: 0 1;
+}
+
+HealthScreen #health-checks {
+    height: auto;
+    max-height: 30;
+}
+
+HealthScreen #health-detail {
+    padding: 1 1 0 1;
+}

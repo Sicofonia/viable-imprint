@@ -169,6 +169,42 @@ def book_status(root: Path) -> list:
     return rows
 
 
+def resolve_input(root: Path, key: str) -> tuple:
+    """`(input path, None)` for the book-graph task `key` ("<system>.<task>") when its
+    input exists, else `(None, reason)` — the same rule `ready_tasks()` and
+    `book_status()` apply (the single source file, or the dependency's ledger
+    `output`), but for any task, `done` ones included. Read-only; used by the
+    terminal UI (ADR 023) to re-run a task with exactly the input `s2 run` would use.
+    """
+    ledger = manifest.load(root).get("tasks", {})
+    for node in _load_graph():
+        if f"{node['system']}.{node['task']['name']}" != key:
+            continue
+        depends_on = node["depends_on"]
+        if depends_on is None:
+            return _source_file(root)
+        dep_entry = ledger.get(depends_on)
+        if dep_entry and dep_entry.get("status") == "done":
+            return root / dep_entry["output"], None
+        return None, f"waiting on {depends_on}"
+    raise KeyError(f"{key} is not a task in the book graph")
+
+
+def downstream_of(key: str) -> list:
+    """Every task transitively downstream of `key` in the book graph, nearest first —
+    the set `cascade_invalidate()` walks. Read-only."""
+    dependents = _dependents_map()
+    queue, seen, order = list(dependents.get(key, [])), set(), []
+    while queue:
+        dep_key = queue.pop(0)
+        if dep_key in seen:
+            continue
+        seen.add(dep_key)
+        order.append(dep_key)
+        queue.extend(dependents.get(dep_key, []))
+    return order
+
+
 def ready_tasks(root: Path, only: str = None) -> list:
     """Every graph node not yet `done` whose dependency is satisfied —
     including a previously `failed` task, which is always eligible for retry.

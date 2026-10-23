@@ -1,0 +1,11 @@
+<fuente nombre="Tiny test feed" estado="nuevo desde el último scan">
+- New edition of a Central Asian travel classic announced
+  Fecha: Mon, 05 Oct 2026 09:00:00 GMT
+  Enlace: https://example.invalid/news/1
+  A small press has announced a new annotated edition of a nineteenth-century journey to Kashgar.
+
+- Public-domain scans: what libraries added this month
+  Fecha: Tue, 06 Oct 2026 09:00:00 GMT
+  Enlace: https://example.invalid/news/2
+  Several digital libraries added exploration narratives to their open collections.
+</fuente>

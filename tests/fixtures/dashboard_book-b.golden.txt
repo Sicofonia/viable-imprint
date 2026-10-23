@@ -1,0 +1,8 @@
+Book: book-b
+
+Task                        Duration  Provider/Model                    Usage                         Cost
+s1b.cleanup                      10s  fake / fake-1                     1,500 tokens                $0.010
+s1b.format                        2s  -                                 -                                -
+
+Total: 2/13 tasks done, 12s compute time, $0.010 API cost
+In-pipeline span: 2026-09-02 -> 2026-09-02 (in progress)

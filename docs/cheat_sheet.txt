@@ -1,4 +1,7 @@
 VIABLE IMPRINT — COMMAND CHEAT SHEET
+NOTE: the terminal UI's command explorer (uv run python pipeline.py ui, then e) is generated from the CLI
+itself, so it is always current; this sheet is kept by hand and can drift. The S1C workflow notes below
+(page sizing, the cover example) are reproduced on the UI's print prep screen (p).
 Every command is prefixed with: uv run python pipeline.py
 (<slug> = book folder name under books/, e.g. life-as-explorer)
 

@@ -1,0 +1,11 @@
+## Verdict
+<verdict>Encaja</verdict>
+
+## Thematic Scope
+The candidate is a nineteenth-century travel narrative set in Central Asia, with a public-domain text and a scan available. This matches the imprint's period, geography and rights requirements.
+
+## Non-Negotiable Values
+No objections: a scanned source exists and can be checked against the printed edition.
+
+## Recommendation
+Proceed to a sample cleanup. Confirm the scan's completeness before committing.

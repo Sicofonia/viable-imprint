@@ -84,7 +84,21 @@ def get_llm_provider(config: dict) -> LLMProvider:
             thinking=thinking,
             request_pacing_seconds=pacing,
         )
+    if name == "fake":
+        # ADR 023: tests only. No key, no network; selected by config alone.
+        from providers.llm.fake import FakeLLMProvider
+        return FakeLLMProvider(**_fake_options(config["llm"], "llm"))
     raise ValueError(f"Unknown LLM provider: {name!r}. Supported: z-ai, mistral, google-aistudio")
+
+
+def _fake_options(section: dict, label: str) -> dict:
+    fail = section.get("fail", False)
+    delay = section.get("delay_seconds", 0)
+    if not isinstance(fail, bool):
+        raise click.ClickException(f"{label}.fail must be true or false.")
+    if isinstance(delay, bool) or not isinstance(delay, (int, float)) or delay < 0:
+        raise click.ClickException(f"{label}.delay_seconds must be a non-negative number of seconds.")
+    return {"fail": fail, "delay_seconds": float(delay)}
 
 
 def get_translation_provider(config: dict) -> TranslationProvider:
@@ -133,4 +147,8 @@ def get_translation_provider(config: dict) -> TranslationProvider:
             )
         from providers.translation.deepl import DeepLProvider
         return DeepLProvider(api_key=api_key)
+    if name == "fake":
+        # ADR 023: tests only. No key, no network; selected by config alone.
+        from providers.translation.fake import FakeTranslationProvider
+        return FakeTranslationProvider(**_fake_options(config["translation"], "translation"))
     raise ValueError(f"Unknown translation provider: {name!r}. Supported: etranslation, deepl")
