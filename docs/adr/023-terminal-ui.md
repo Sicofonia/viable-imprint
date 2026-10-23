@@ -1,6 +1,6 @@
 # ADR 023 — Terminal UI (Textual) Over the Existing Pipeline
 
-**Status:** Approved. Implemented through T8.1 (2026-10-22). **T8.2 (live smoke script) and T8.3 (documentation, final status) are not done**: T8.2 uses real API keys and is left for the operator to run and record. Written as an ordered task list for Claude Code; every task states its scope, its tests, and when it is done.
+**Status:** Implemented (2026-10-23), with one open item: the live `core` and `full` smoke runs of T8.2 spend real provider quota, so the operator runs them and records the results in the table under T8.2 in the Implementation notes. Written as an ordered task list for Claude Code; every task states its scope, its tests, and when it is done.
 
 ---
 
@@ -818,3 +818,15 @@ Flags: `--yes` (skip the confirmation), `--clean` (delete the workspace at the e
 |---|---|---|---|---|---|---|
 | `--scope core` | | | | | | |
 | `--scope full` | | | | | | |
+
+**T8.3 — Documentation.** README: "Using the UI" now covers install and launch, the keys, what each screen does (a table), the rules the UI follows (command shown first, confirmation before provider calls, one run at a time and not running the CLI in parallel, outputs and briefs opening externally, what the UI writes itself) and the removal procedure from Decision 1; "Tests" covers running the suite (and in pieces), the fake providers, the guard on real data, the timeouts and the live smoke script with its four commands. `docs/cheat_sheet.txt` has a note at the top that the explorer is generated from the CLI and always current, and that the S1C sizing notes are reproduced on the print prep screen.
+- **The README cannot drift unnoticed:** `tests/tui/test_tui_docs.py` checks that every screen key and title is documented, that the removal procedure lists what the ADR says, that the cheat-sheet note exists, and that each documented smoke command still parses and plans (run only as `--dry-run`, so no test reaches a provider) and each documented unittest module exists.
+- **Documented commands run once on the operator's machine** (this one): `uv sync --extra tui`, `pipeline.py ui --help`, `smoke.py --scope core|full --dry-run`, the "everything except the UI" discover command (171 tests then, 192 with T8.2) and the chosen-modules example. Not run: the interactive `pipeline.py ui` itself, which needs a real terminal (the same app was opened headlessly against the real config instead, see the T8.1 note and the earlier smoke check), and the two live smoke commands, left to the operator as explained under T8.2.
+- **Suite size and duration at the end:** 464 tests, about 12 minutes in one piece, run during this work in four bounded pieces (non-UI about 2 minutes, the UI modules in thirds of 4 to 8 minutes) with a hard time limit on each.
+
+### Deviations from the plan, for the record
+
+- **Pipeline-side changes beyond the ADR's list**, all additive or pure moves guarded by golden or parity tests: `lib/interrupt.py` and `pipeline.main()` (Decision 6 needed child-side help on Windows); `orchestrator.resolve_input` and `downstream_of` (T2.3); the dashboard wording moved into `lib/formatting.py` (T4.1).
+- **`RunRequest.on_done`, hide-and-reopen of the run log (`ctrl+r`), warnings in the run summary, `argv_for(keep_typed=...)`** were not in the ADR; each came from a concrete need and is described in its task note.
+- **Facts in the ADR that turned out different:** the command count (41 plus `ui` itself); `s1b format` does not need LibreOffice; the rendered homeostat page is `combined.html`; `full` is 16 LLM calls rather than 17; the `--skip-translate` flag became the default with `--with-translate` opting in.
+- **Known gaps left as they were:** manifest-driven commands have no help text in the Click tree; the ISBN check has no checksum; `s5 homeostat-scan` and `s1d newsletter-scan` run directly use the wrong root (pinned by tests, warned in the explorer); the ledger still has no file locking.

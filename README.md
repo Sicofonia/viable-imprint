@@ -528,14 +528,42 @@ This drives `newsletter-scan` → `newsletter` → `newsletter-track` in order a
 
 ## Using the UI
 
-An optional terminal UI (ADR 023) puts menus over every command below, so you pick a book instead of typing a path. It is a foreground program you open and close; it never runs anything on its own, and the pipeline works exactly as before without it.
+An optional terminal UI (ADR 023) puts menus over every command in this README, so you pick a book or a candidate instead of typing a path. It is a foreground program you open and close; it never runs anything on its own, and the pipeline works exactly as before without it. Windows is the platform it has been tested on.
+
+**Install and launch** (from the repository root):
 
 ```bash
-uv sync --extra tui          # once; installs Textual (re-run it after any plain `uv sync`, which removes it)
-uv run python pipeline.py ui
+uv sync --extra tui                  # once; installs Textual. A later plain `uv sync` removes it, so re-run this
+uv run python pipeline.py ui         # opens the UI; add --config other.yaml before `ui` for another config
 ```
 
-Launch it from the repository root, optionally with `--config` like any other command (`uv run python pipeline.py --config other.yaml ui`). `q` quits.
+Without the extra, `pipeline.py ui` prints the install command and exits; every other command is unaffected.
+
+**Keys.** On the home screen: `n` new book, `e` command explorer, `p` print prep, `d` dashboard and sales, `i` intelligence, `r` periodic pipelines, `c` candidates, `h` health. Everywhere: `escape` goes back, `?` lists the keys, `ctrl+p` opens the command palette, `ctrl+r` brings back the log of the running command, `q` quits. `Enter` on a book opens it.
+
+**What each screen does**
+
+| Screen | What it is for |
+|---|---|
+| Home | Every book (tasks done, failed, stale, ISBN, last activity), newest first, and a new-book form that runs `init` and copies in the manuscript |
+| Book | Every task's state, exactly as `s2 status` words it; run one task (with its `--document` / `--template` options), run the pipeline (all, one system, one step), open outputs, the book folder and `manifest.yaml`, set the ISBN |
+| Command explorer (`e`) | Every command in every system, with a form for its arguments and options. It is generated from the CLI, so it is always current; it replaces the hand-kept cheat sheet |
+| Print prep (`p`) | `s1c check`, `set-interior` and `set-cover`, with the PDF page size the cover export must have shown as you type |
+| Dashboard and sales (`d`) | `s3 dashboard` for the portfolio and one book, and `s3 sales-ingest` with the receipt |
+| Intelligence (`i`) | `s4 scan`, `briefing`, `content-strategy` and `s1d article-draft`, each working on the newest output of the step before unless you pick another |
+| Periodic (`r`) | The homeostat chain and its decision log; the monthly newsletter chain, this month's notes file and the names already featured |
+| Candidates (`c`) | Briefs and their verdicts, evaluate, record your decision, the verdict-against-decision counts, and whether the policy prompt is in sync with `docs/vsm.md` |
+| Health (`h`) | What would make a run fail: config, provider keys (shown only as set or missing), missing prompt and template files, policy sync, data folders |
+
+**Rules the UI follows**
+
+- Every action shows its command-line equivalent (`uv run python pipeline.py ...`) before it runs, and the run log repeats it. The terminal stays a complete fallback.
+- Anything that calls an LLM or translation provider asks first, showing the provider and model, the input size, about how many calls and the estimated cost (or "no pricing configured"). Call counts matter most on free tiers.
+- **One command runs at a time.** The run-state ledger is not locked, so do not run `pipeline.py` in another terminal while the UI is running something. A cancel interrupts the command the way Ctrl+C would, and the task is recorded as failed and can be retried.
+- Outputs (the homeostat page, deliverables, PDFs), candidate briefs and newsletter notes open in your operating system's default application or editor; the UI does not draw them.
+- The UI reads state by calling `lib/` directly and changes it only by running `pipeline.py`. The few files it writes itself are ones you would otherwise create by hand: a new book's manuscript copy, an empty candidate brief, this month's newsletter notes file.
+
+**Removing the UI.** Delete `tui/`, `tests/tui/`, `tests/live/` and `tests/test_live_smoke.py`, remove the `ui` command from `pipeline.py` and the `tui` extra from `pyproject.toml`. Nothing else imports `tui` (a test checks). The fake providers, the test harness and `lib/formatting.py` stay: they are useful without it.
 
 ---
 
@@ -545,7 +573,25 @@ Launch it from the repository root, optionally with `--config` like any other co
 uv run python -m unittest discover -s tests
 ```
 
-Every automated test runs offline against **fake providers** (`llm.provider: fake` and `translation.provider: fake`, ADR 023): no network, no API key, no quota. The fakes exist for tests only — they return deterministic placeholder text that satisfies the structural contracts the code parses (`<overview>`, `<explorer>`, `<dish>`, `<verdict>`), not anything resembling real output. Don't set them in your real `config.yaml`.
+Every automated test runs offline against **fake providers** (`llm.provider: fake` and `translation.provider: fake`, ADR 023): no network, no API key, no quota. The fakes exist for tests only — they return deterministic placeholder text that satisfies the structural contracts the code parses (`<overview>`, `<explorer>`, `<dish>`, `<verdict>`), not anything resembling real output. Don't set them in your real `config.yaml`. Each test gets temporary data folders, and a guard test fails the suite if your real `books/`, `intelligence/`, `candidates/`, `homeostat/` or `newsletter/` change.
+
+The whole suite takes about ten minutes, because most UI tests start a real `pipeline.py` subprocess. The tests that need your personal prompts or templates skip, naming the missing file, on a clean clone; the UI tests skip if Textual is not installed. Every asynchronous test fails after two minutes instead of hanging, and a watchdog ends a run that is stuck for five, printing where. To run it in pieces:
+
+```bash
+uv run python -m unittest discover -s tests -p "test_[a-s]*.py"        # everything except the UI, about 2 minutes
+uv run python -m unittest tests.tui.test_tui_explorer tests.tui.test_tui_shell   # chosen UI test modules
+```
+
+**Live smoke test.** `tests/live/smoke.py` runs a few tiny inputs through your **real** providers, in a temporary workspace that leaves your own data alone. It is never part of the suite. It prints what it is about to do and asks before spending anything, stops when the cost recorded exceeds `PIPELINE_LIVE_MAX_USD` (default 0.10), and refuses inputs over 1,500 characters.
+
+```bash
+uv run python tests/live/smoke.py --scope core --dry-run      # show the plan; calls nothing
+uv run python tests/live/smoke.py --scope core                # 4 LLM calls
+uv run python tests/live/smoke.py --scope full                # about 16 LLM calls; translation skipped
+uv run python tests/live/smoke.py --scope full --with-translate   # also one real translation request
+```
+
+`--yes` skips the confirmation and `--clean` deletes the workspace afterwards.
 
 ---
 
