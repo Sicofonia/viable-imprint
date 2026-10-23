@@ -7,13 +7,18 @@ writes anything. Plain Python, no Textual.
 """
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
-from lib import homeostat, manifest, orchestrator
+from lib import books, homeostat, manifest, orchestrator
 from tui.services.context import Context
+
+
+# How a finished book is marked in lists. Plain ASCII on purpose: a check mark (U+2713) is missing from the
+# default fonts of Windows terminals (Git Bash's mintty draws a box), and `[x]` is what the CLI and the task
+# marks already use.
+DONE_MARK = "[x]"
 
 
 @dataclass
@@ -26,14 +31,7 @@ class BookRow:
     stale: int
     isbn: str = None
     last_activity: str = None     # ISO timestamp, UTC
-
-
-def _last_activity(root: Path, ledger: dict) -> str:
-    stamps = [s for entry in ledger.values() for s in (entry.get("completed_at"), entry.get("attempted_at")) if s]
-    if stamps:
-        return max(stamps)
-    mtime = (root / "manifest.yaml").stat().st_mtime
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
+    done_on: str = None           # the date the book was marked done (`book done`), None while in progress
 
 
 def book_row(root: Path) -> BookRow:
@@ -43,17 +41,19 @@ def book_row(root: Path) -> BookRow:
     return BookRow(
         slug=root.name, path=root, tasks_total=len(rows), done=counts["done"], failed=counts["failed"],
         stale=counts["stale"], isbn=data.get("isbn") or None,
-        last_activity=_last_activity(root, data.get("tasks", {})),
+        last_activity=books.last_activity(root, data.get("tasks", {})),
+        done_on=str(data[books.DONE_KEY]) if data.get(books.DONE_KEY) else None,
     )
 
 
 def list_books(ctx: Context) -> list:
-    """Every book under `books_dir`, most recently active first."""
+    """Every book under `books_dir`: those in progress first, most recently active first, then those
+    marked done (`lib.books.order`)."""
     books_dir = ctx.data_dir("books_dir")
     if not books_dir.is_dir():
         return []
     rows = [book_row(p) for p in sorted(books_dir.iterdir()) if p.is_dir() and (p / "manifest.yaml").is_file()]
-    return sorted(rows, key=lambda r: r.last_activity or "", reverse=True)
+    return books.order(rows, lambda r: r.done_on, lambda r: r.last_activity)
 
 
 def format_activity(iso: str) -> str:

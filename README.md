@@ -369,6 +369,16 @@ uv run python pipeline.py s3 sales-ingest life-as-explorer downloads/ingramspark
 
 Drop in whatever royalty CSV you downloaded from IngramSpark, KDP, or (once you've added a `providers/sales/` adapter for it) any other platform you sell through — the format is auto-detected from the CSV's own header row, no need to say which platform it's from. Re-ingesting the same file twice is a safe no-op: matching rows are deduped against what's already recorded, not double-counted. `s3 dashboard` then shows revenue (grouped by currency — no automatic conversion) and a *reported* margin, explicitly labeled as revenue minus tracked API cost only, not `vsm.md`'s full title-economics metric. No portal automation — this is manual download, drop-in the CSV, same as every other "no background process" step in this pipeline. See `docs/adr/011-system-3-sales-ingestion.md`.
 
+**Mark a finished book as done:**
+
+```bash
+uv run python pipeline.py book done life-as-explorer      # it stays on disk, in the dashboard and in the sales figures
+uv run python pipeline.py book list                       # books in progress first, finished ones last, marked [x]
+uv run python pipeline.py book reopen life-as-explorer    # undo it
+```
+
+A done book is only *listed* differently: after the books in progress in `book list` and in the UI (with a green `[x]`), and with a line in `s2 status`. It carries `done_on: <date>` in its `manifest.yaml`. Nothing is hidden, deleted or locked, so `s2 run` and `s3 dashboard` treat it like any other book and `book reopen` puts it back. Marking a book whose tasks are not all done is allowed (a project can be abandoned), and says how many are.
+
 The rest of this section walks through the same pipeline one command at a time, useful for understanding what each step does or for rerunning a single one after a manual edit.
 
 **Clean OCR text:**
@@ -545,8 +555,8 @@ Without the extra, `pipeline.py ui` prints the install command and exits; every 
 
 | Screen | What it is for |
 |---|---|
-| Home | Every book (tasks done, failed, stale, ISBN, last activity), newest first, and a new-book form that runs `init` and copies in the manuscript |
-| Book | Every task's state, exactly as `s2 status` words it; run one task (with its `--document` / `--template` options), run the pipeline (all, one system, one step), open outputs, the book folder and `manifest.yaml`, set the ISBN |
+| Home | Every book (tasks done, failed, stale, ISBN, last activity): books in progress newest first, then finished books with a green `[x]`; and a new-book form that runs `init` and copies in the manuscript |
+| Book | Every task's state, exactly as `s2 status` words it; run one task (with its `--document` / `--template` options), run the pipeline (all, one system, one step), open outputs, the book folder and `manifest.yaml`, set the ISBN, mark the book as done or reopen it |
 | Command explorer (`e`) | Every command in every system, with a form for its arguments and options. It is generated from the CLI, so it is always current; it replaces the hand-kept cheat sheet |
 | Print prep (`p`) | `s1c check`, `set-interior` and `set-cover`, with the PDF page size the cover export must have shown as you type |
 | Dashboard and sales (`d`) | `s3 dashboard` for the portfolio and one book, and `s3 sales-ingest` with the receipt |
