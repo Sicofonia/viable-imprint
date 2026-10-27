@@ -22,11 +22,18 @@ tasks:
     engine: llm_text
     prompt: prompts/s1b/ortho_task.txt
     # Same reasoning as cleanup above.
+    # min_output_ratio: output must be at least this fraction of the input
+    # chunk's length, else the chunk is retried once and then the task fails
+    # (engines/llm_text.py _complete_chunk). Added after a copyedit run silently
+    # dropped a whole 27-paragraph chunk; ortho and copyedit only substitute
+    # within paragraphs, so a large shrink always means lost text.
+    min_output_ratio: 0.85
 
   - name: copyedit
     engine: llm_text
     prompt: prompts/s1b/copyedit_task.txt
     # Same reasoning as cleanup above.
+    min_output_ratio: 0.85   # see ortho above
 
   - name: format
     engine: odt_format
