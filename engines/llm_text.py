@@ -79,6 +79,43 @@ def _resolve_default_max_chars(config: dict) -> int:
     return int(max_output_tokens * _CHARS_PER_TOKEN_ESTIMATE)
 
 
+# Chunks shorter than this are not length-checked (min_output_ratio): a tiny
+# chunk — a lone chapter title, a "---" divider — can legitimately come back
+# in a very different size, and a false alarm there would fail a whole run.
+_MIN_GUARDED_CHUNK_CHARS = 500
+
+
+def _complete_chunk(llm, system_prompt: str, chunk: str, *, temperature: float,
+                    min_output_ratio: float, label: str) -> str:
+    """One chunk's LLM call, with the shrink guard for tasks that opt in.
+
+    Found on a real run (the-gobi-desert, s1b copyedit, chunk 2 of 104): for
+    a 7,917-char / 27-paragraph chunk ending in a chapter title, Mistral
+    returned only the title line. Nothing in the engine objected, so ~8,000
+    chars of the book silently vanished from every later stage. A task that
+    sets min_output_ratio in tasks.yaml declares its output should be roughly
+    as long as its input (ortho, copyedit: per-paragraph substitutions only),
+    so a reply under that fraction of the input is retried once, then fails
+    loud rather than being written to disk. Deliberately opt-in: cleanup
+    legitimately shrinks text (page apparatus is deleted).
+    """
+    guarded = min_output_ratio is not None and len(chunk) >= _MIN_GUARDED_CHUNK_CHARS
+    for attempt in (1, 2):
+        out = _strip_code_fence(llm.complete(system_prompt, chunk, temperature=temperature))
+        if not guarded or len(out) >= min_output_ratio * len(chunk):
+            return out
+        ratio = len(out) / len(chunk)
+        if attempt == 1:
+            click.echo(f"  {label}: response is {ratio:.0%} of the input length "
+                       f"(minimum {min_output_ratio:.0%}) — text was likely dropped, retrying once...")
+    raise click.ClickException(
+        f"{label}: the model returned {len(out)} chars for a {len(chunk)}-char chunk "
+        f"({ratio:.0%}, below min_output_ratio={min_output_ratio:.0%}) on both attempts — "
+        f"part of the text was probably dropped. Nothing was written. Re-run the task; if it "
+        f"keeps failing on this chunk, inspect its input and the prompt."
+    )
+
+
 def _served_models(llm, config: dict) -> tuple:
     """(model to record, models_used list or None) — ADR 020. With no
     fallback switch this is exactly the configured model and None, so the
@@ -121,7 +158,7 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
         *, prompt: str, manifest_key: str = None, max_chars: int = None,
         temperature: float = None, metadata_config: str = None,
         metadata_footer: str = None, single_chunk: bool = False,
-        reduce_prompt: str = None) -> Path:
+        reduce_prompt: str = None, min_output_ratio: float = None) -> Path:
     output_dir = paths.stage_output_dir(input_file, root, system, output_name)
     output_file = output_dir / input_file.name
 
@@ -160,7 +197,10 @@ def run(input_file: Path, root: Path, system: str, output_name: str, config: dic
     parts = []
     for i, chunk in enumerate(chunks, 1):
         click.echo(f"  {output_name} chunk {i}/{total}...")
-        parts.append(_strip_code_fence(llm.complete(system_prompt, chunk, temperature=temperature)))
+        parts.append(_complete_chunk(
+            llm, system_prompt, chunk, temperature=temperature,
+            min_output_ratio=min_output_ratio, label=f"{output_name} chunk {i}/{total}",
+        ))
 
     # Reduce pass (ADR 014, Decision 2): only when chunking actually happened
     # and this task has a reduce prompt configured. Reconciles the N
