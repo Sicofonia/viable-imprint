@@ -57,11 +57,15 @@ On the first run, the engine splits the input with the same `chunk_by_paragraphs
 books/<slug>/s1b/translated/es/assisted/
   chunks.yaml      # source path, source sha256, max_chars, chunk count, per-chunk paragraph count, created_at
   glossary.md      # per-book terms: names, places, titles, recurring phrases (Decision 5)
-  001.en.txt       # source chunk, never edited
-  001.es.txt       # written in the chat; absent until translated
-  002.en.txt
+  en/001.txt       # source chunks, never edited
+  en/002.txt
+  ...
+  es/001.txt       # written in the chat; absent until translated
+  es/002.txt
   ...
 ```
+
+Sources and translations are in separate folders so `es/` shows at a glance what is done (its file count is the progress), and the chat never writes next to a source file.
 
 `max_chars` defaults to 7,000 characters, about three printed pages. That is small enough that one subagent translates a chunk comfortably in a single turn (and a chunk that fails validation is cheap to redo), and large enough that *the-gobi-desert* is about 105 chunks rather than several hundred. The pilot (T0) can change the default.
 
@@ -73,15 +77,15 @@ Nothing in the pipeline runs during this step. The person opens a Claude Code ch
 
 From then on the chat works through the chunks in order without stopping to ask anything. A book is about 105–150 chunks, more than one conversation can hold, so the main chat does not translate them itself. It hands **each chunk to its own subagent** (Claude Code's Agent tool), one after another. Each subagent starts with a fresh, small context, translates one chunk following the steps below, writes the file and returns a one-line result. The main chat keeps only those one-line results, so it can get through a whole book in one request. Chunks run one at a time, not in parallel, so that each chunk can read the previous chunk's translation and the glossary as it stands.
 
-The prompt file tells the main chat how to dispatch the chunks (in order, one subagent each, skip any chunk whose `.es.txt` already exists, never stop to ask) and tells each subagent what to do with its chunk:
+The prompt file tells the main chat how to dispatch the chunks (in order, one subagent each, skip any chunk that already has a file in `es/`, never stop to ask) and tells each subagent what to do with its chunk:
 
-1. Read `glossary.md` and the last paragraph or two of the previous chunk's `.es.txt` (if any), for consistent names and a continuous voice across chunk boundaries.
-2. Read `NNN.en.txt` and write `NNN.es.txt` with the translation only: no preamble, no notes, the same paragraphs in the same order, and markup (`[i]…[/i]`, `[sc]…[/sc]`, `[FN: … [/FN]]`, `---`) kept exactly where it is.
+1. Read `glossary.md` and the last paragraph or two of the previous chunk's translation in `es/` (if any), for consistent names and a continuous voice across chunk boundaries.
+2. Read `en/NNN.txt` and write `es/NNN.txt` with the translation only: no preamble, no notes, the same paragraphs in the same order, and markup (`[i]…[/i]`, `[sc]…[/sc]`, `[FN: … [/FN]]`, `---`) kept exactly where it is.
 3. Add any new proper noun, title or recurring phrase to `glossary.md` with the Spanish form chosen.
 
 **The person does not review chunks as they are written.** They start the request and come back when it has finished. Consistency comes from the glossary and the previous chunk's tail, not from chat memory, so the result does not depend on how the work was split between subagents or chats.
 
-**Stopping and resuming is normal.** A run can stop part-way: the plan's usage limit is reached, VS Code is closed, the connection drops. Every finished chunk is already a file on disk, so the person asks again in a new chat ("continue translating the pending chunks of the-gobi-desert") and it picks up at the first missing `.es.txt`. A chunk interrupted half-written is caught by merge (Decision 6) and simply redone.
+**Stopping and resuming is normal.** A run can stop part-way: the plan's usage limit is reached, VS Code is closed, the connection drops. Every finished chunk is already a file on disk, so the person asks again in a new chat ("continue translating the pending chunks of the-gobi-desert") and it picks up at the first chunk with no file in `es/`. A chunk interrupted half-written is caught by merge (Decision 6) and simply redone.
 
 **Review happens after merge**, on `translated/es/source.txt` or later outputs, the same way the Director reviews every other stage today. When a passage needs fixing, the person either edits the merged text directly or asks for those chunks again and re-runs `s1b translate` (Decision 6, last paragraph).
 
@@ -96,8 +100,8 @@ The prompt does the translation only. Typography stays with the stages that alre
 | Work folder state | What the engine does | Ledger status |
 |---|---|---|
 | No `assisted/` folder | Prepare (Decision 2), print what to do next | `waiting` |
-| Some `.es.txt` files missing | Print progress (`37/105 chunks translated`) and the next range to ask for | `waiting` |
-| Every `.es.txt` present | Validate (Decision 6), then merge into `translated/es/source.txt` | `done`, or `waiting` with the list of chunks that failed validation |
+| Some chunks have no file in `es/` | Print progress (`37/105 chunks translated`) and the next range to ask for | `waiting` |
+| Every chunk has a file in `es/` | Validate (Decision 6), then merge into `translated/es/source.txt` | `done`, or `waiting` with the list of chunks that failed validation |
 
 `waiting` needs three small changes, each next to the code that handles the existing statuses:
 
@@ -115,12 +119,12 @@ The glossary is a book artefact, not imprint-wide configuration. An imprint-wide
 
 ### 6. Merge validates before it writes anything
 
-Merge writes `translated/es/source.txt` only if every chunk passes these checks. Otherwise it records `waiting` with the failing chunk numbers and the reason for each, and moves each failing `.es.txt` to `NNN.es.rejected.txt`. Those chunks then count as pending, so the same "translate every pending chunk" request redoes exactly them.
+Merge writes `translated/es/source.txt` only if every chunk passes these checks. Otherwise it records `waiting` with the failing chunk numbers and the reason for each, and moves each failing translation to `es/NNN.rejected.txt`. Those chunks then count as pending, so the same "translate every pending chunk" request redoes exactly them.
 
 - **Source unchanged:** the sha256 of the current cleaned input matches `chunks.yaml`. If `cleanup` was re-run after prepare, merge refuses and tells the person to run `s1b translate --restart` (Decision 7). Translating against an old source would silently undo the new cleanup.
 - **Every chunk present and not empty.**
-- **Same paragraph count** as the matching `.en.txt` (split on blank lines, as the chunker does). This is the check that would have caught the dropped chunk fixed in PR #51.
-- **Length within bounds:** Spanish usually runs longer than English (eTranslation's Spanish for this book is 9% longer than the cleaned English: 797,052 against 730,335 characters), so a `.es.txt` outside 0.9–1.6 times its source length is flagged. The pilot tunes the bounds.
+- **Same paragraph count** as the matching file in `en/` (split on blank lines, as the chunker does). This is the check that would have caught the dropped chunk fixed in PR #51.
+- **Length within bounds:** Spanish usually runs longer than English (eTranslation's Spanish for this book is 9% longer than the cleaned English: 797,052 against 730,335 characters), so a translation outside 0.9–1.6 times its source length is flagged. The pilot tunes the bounds.
 - **Markup balanced:** the same number of `[i]`/`[/i]`, `[sc]`/`[/sc]` and `[FN:`/`[/FN]]` as the source, and `---` lines in the same places.
 - **No chat leftovers:** no first line that looks like a preamble ("Aquí está la traducción", "Traducción:", a Markdown heading or code fence that is not in the source).
 
@@ -141,7 +145,7 @@ The full flow for one book, with the manual step in the middle:
 2. In VS Code, ask once for every pending chunk (Decision 3) and leave it running. If it stops part-way, ask again in a new chat. `pipeline.py s1b translate <slug's cleaned source> --status` shows how far along it is, at any time.
 3. `pipeline.py s2 run <slug>` again. Translate validates and merges, the ledger records `done`, and the run carries on through `ortho`, `copyedit` and `format` (and System 1D, unless `--only s1b`).
 
-If validation fails in step 3, the run stops at translate again with the failing chunks listed. Merge moves each failing `.es.txt` aside (to `NNN.es.rejected.txt`), so repeating step 2 with the same request redoes exactly those chunks and nothing else.
+If validation fails in step 3, the run stops at translate again with the failing chunks listed. Merge moves each failing translation aside (to `es/NNN.rejected.txt`), so repeating step 2 with the same request redoes exactly those chunks and nothing else.
 
 The ledger records `provider: assisted`, `model` from `translation.assisted.model_note`, `duration_seconds` of the merge run only, and no `cost_usd`. The chat's usage is not visible to the pipeline. `s3 dashboard` shows the task with no cost, as it already does for tasks without usage.
 
@@ -211,6 +215,8 @@ What was built, and where it differs from the plan above.
 - `providers/__init__.py`: `get_translation_provider()` has an `assisted` branch that raises a clear error, because a test pins the factory's provider names to the health table, and anything but `s1b translate` asking for an assisted provider is a mistake.
 
 **Differences from the plan**
+- **Separate `en/` and `es/` folders (2026-10-28, after the first experiment).** The plan (and the first build) wrote `NNN.en.txt` and `NNN.es.txt` side by side, 116 files in one folder after the three-chunk experiment on *the-gobi-desert*. Sources now live in `en/NNN.txt` and translations in `es/NNN.txt` (rejected ones as `es/NNN.rejected.txt`): `es/` shows progress at a glance and the chat never writes next to a source. Only the path helpers in `lib/assisted_translation.py` changed, plus the prompt, README and these notes; the tests go through the helpers and needed no edit. The experiment's work folder was moved to the new layout by hand (file moves only, index untouched).
+- **Descriptive names are translated (prompt, same day).** The experiment's glossary kept names such as "Horseshoe Temple" and "River of Sand" in English, because the first prompt said to leave place names as in the original. The prompt now separates descriptive names (translated: Templo de la Herradura) from transcriptions and people's names (kept: Kashgar, Chien Lung), and tells the chat to correct any glossary line that leaves a descriptive name in English.
 - **`--status` and the ledger.** The plan did not say how a read-only call avoids `_run_recorded()`. `TaskWaiting` has a `record=False` form: same stop, ledger untouched.
 - **Chunk count.** On the real cleaned text of *the-gobi-desert* (checked on a scratch copy, nothing under `books/` touched), 7,000 characters gives **111 chunks**, 3,813–6,996 characters each (average 6,510), none tiny; 14 contain a `---` paragraph. The ADR's "about 105" was an estimate.
 - **`waiting` after a re-run of a finished task.** Recording `waiting` replaces the task's earlier `done` entry, and its dependents stay `done` until the merge succeeds, at which point the existing cascade (ADR 009) marks them `stale`. No new invalidation code.

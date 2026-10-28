@@ -4,11 +4,14 @@ merges the result. Nothing here calls a model.
 
 Work folder, next to the merged output (`<book>/s1b/translated/es/assisted/`):
 
-    chunks.yaml     index: source hash, chunk size, per-chunk paragraph/char counts
-    glossary.md     per-book terms, kept up to date by the chat while it translates
-    001.en.txt      source chunk, never edited
-    001.es.txt      its translation, written in the chat (absent until done)
-    001.es.rejected.txt   a translation that failed validation, moved aside by merge
+    chunks.yaml        index: source hash, chunk size, per-chunk paragraph/char counts
+    glossary.md        per-book terms, kept up to date by the chat while it translates
+    en/001.txt         source chunks, never edited
+    es/001.txt         their translations, written in the chat (absent until done)
+    es/001.rejected.txt   a translation that failed validation, moved aside by merge
+
+Sources and translations live in separate folders so that `es/` shows at a glance
+what has been translated, and the chat never writes next to a source file.
 
 `run()` is what `engines/translation.py` calls when `translation.provider` is
 `assisted`. It either raises `TaskWaiting` (prepared / still translating /
@@ -55,20 +58,24 @@ def work_dir(output_dir: Path) -> Path:
     return output_dir / WORK_DIRNAME
 
 
-def _name(index: dict, n: int, suffix: str) -> str:
-    return f"{n:0{index['width']}d}.{suffix}.txt"
+SOURCE_DIRNAME = "en"
+TRANSLATION_DIRNAME = "es"
+
+
+def _name(index: dict, n: int, suffix: str = "") -> str:
+    return f"{n:0{index['width']}d}{suffix}.txt"
 
 
 def source_path(work: Path, index: dict, n: int) -> Path:
-    return work / _name(index, n, "en")
+    return work / SOURCE_DIRNAME / _name(index, n)
 
 
 def translation_path(work: Path, index: dict, n: int) -> Path:
-    return work / _name(index, n, "es")
+    return work / TRANSLATION_DIRNAME / _name(index, n)
 
 
 def rejected_path(work: Path, index: dict, n: int) -> Path:
-    return work / _name(index, n, "es.rejected")
+    return work / TRANSLATION_DIRNAME / _name(index, n, ".rejected")
 
 
 def load_index(work: Path):
@@ -106,7 +113,8 @@ def prepare(work: Path, input_file: Path, root: Path, max_chars: int) -> dict:
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "chunks": [{"n": n, "chars": len(c), "paragraphs": len(paragraphs(c))} for n, c in enumerate(chunks, 1)],
     }
-    work.mkdir(parents=True, exist_ok=True)
+    (work / SOURCE_DIRNAME).mkdir(parents=True, exist_ok=True)
+    (work / TRANSLATION_DIRNAME).mkdir(exist_ok=True)
     for n, chunk in enumerate(chunks, 1):
         _write(source_path(work, index, n), chunk)
     glossary = work / GLOSSARY_NAME
@@ -289,7 +297,7 @@ def run(input_file: Path, root: Path, output_dir: Path, output_file: Path, confi
         click.echo("\n".join(lines))
         raise TaskWaiting(
             f"{len(failures)} translated chunk(s) failed validation and were moved aside "
-            f"(NNN.es.rejected.txt): {_ranges(list(failures))}.\n{_request(work, root)}",
+            f"(es/NNN.rejected.txt): {_ranges(list(failures))}.\n{_request(work, root)}",
             progress=f"{index['count'] - len(failures)}/{index['count']}", work_dir=str(work.relative_to(root)))
 
     text = merged_text(work, index)
