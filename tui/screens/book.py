@@ -18,7 +18,7 @@ from tui.widgets.command_hint import CommandHint
 from tui.widgets.param_form import ParamForm
 from tui.widgets.run_button import RunButton
 
-MARKS = {"done": "[x]", "stale": "[~]", "ready": "[ ]", "blocked": "[ ]", "failed": "[!]"}
+MARKS = {"done": "[x]", "stale": "[~]", "ready": "[ ]", "blocked": "[ ]", "failed": "[!]", "waiting": "[w]"}
 PIPELINE_SCOPES = [("All ready tasks", "all"), ("Only System 1B (editorial)", "s1b"), ("Only System 1D (marketing)", "s1d")]
 
 
@@ -152,7 +152,7 @@ class BookScreen(BaseScreen):
         self.query_one("#open-file", Button).disabled = not (output and output.is_file())
         self.query_one("#open-folder", Button).disabled = not (output and output.parent.is_dir())
         button.display = True
-        button.label = "Run again" if row.status == "done" else "Retry" if row.status == "failed" else "Run task"
+        button.label = "Run again" if row.status == "done" else "Retry" if row.status == "failed" else "Continue" if row.status == "waiting" else "Run task"
         button.blocked_reason = None if row.runnable else row.detail
         self._update_hint(row)
 

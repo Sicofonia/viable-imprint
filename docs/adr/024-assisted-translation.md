@@ -1,6 +1,6 @@
 # ADR 024 — Assisted Translation: Chunk, Translate in Claude Code, Merge
 
-**Status:** Proposed (2026-10-28). Branch-only: this work stays on `feature/adr-024-assisted-translation` and is not planned for `main` for now, because it puts a person back inside a task the pipeline otherwise runs unattended (see **Consequences**). Nothing is implemented yet; T0 (a one-chapter pilot) comes before any code.
+**Status:** Implemented on the branch (2026-10-28), pilot not yet run. Branch-only: this work stays on `feature/adr-024-assisted-translation` and is not planned for `main` for now, because it puts a person back inside a task the pipeline otherwise runs unattended (see **Consequences**). T1–T5 are built and tested offline; **T0 (the pilot) and T6 (a first real book) are the Editorial Director's to run**, and the draft prompt `prompts/s1b/translate_task.txt` is waiting to be reviewed together first. See **Implementation Notes**.
 
 ---
 
@@ -187,10 +187,37 @@ The ledger records `provider: assisted`, `model` from `translation.assisted.mode
 
 Each task is done when its own check passes. Tests run offline (CONTRIBUTING.md), with a fake work folder, not a real chat.
 
-- [ ] **T0 — Pilot, before any code.** Co-write `prompts/s1b/translate_task.txt` (Spanish, local only). Split the prologue and chapter 1 of *the-gobi-desert* (lines 1–101 of `s1b/cleaned/source.txt`, 14,595 characters, two or three chunks) with a throwaway script. Translate them in the VS Code chat with a single request, using one subagent per chunk as in Decision 3, and confirm the chat gets through every chunk without stopping to ask anything. Compare with the same passage in the existing eTranslation output (`s1b/translated/es/source.txt`, lines 1–101). Record in this ADR: model(s) used, time spent, how much of the plan's usage it took, the paragraph-count and length-ratio results, and the Director's verdict. **Go or no-go for T1 onwards.**
-- [ ] **T1 — `lib/assisted_translation.py`:** prepare, status, validate and merge, as plain functions on a work folder. Unit tests for each validation rule in Decision 6, including a dropped paragraph, unbalanced `[i]`, a preamble line and a changed source hash.
-- [ ] **T2 — `TaskWaiting` and the `waiting` status** in `lib/task_loader._run_recorded()` and `lib/orchestrator.run_book()` / `_summarize()`. Tests: a waiting task is not `failed`, blocks its dependents, and is offered again on the next run.
-- [ ] **T3 — Show `waiting` everywhere statuses are shown:** `s2 status`, `s3 dashboard`, `tui/services/state.py` and the book screen. Find every place with `grep` for `"stale"` and `"failed"` first, and list them here.
-- [ ] **T4 — Wire the provider:** `translation.provider: assisted` in `engines/translation.py`, the `assisted:` config block in `config.example.yaml`, and `--status` / `--restart` options. A test runs `s2 run` twice on a fake book: first run stops at waiting, chunk files are filled in, second run merges and reaches `ortho`.
-- [ ] **T5 — Documentation:** README (the three-step flow from Decision 8), `docs/cheat_sheet.txt` (`--status`, `--restart`), and this ADR's implementation notes.
+- [ ] **T0 — Pilot.** (Not done: it needs the prompt reviewed together and a real chat session, which the Director runs. T1–T5 were built before it, at the Director's request; a no-go would mean shelving the branch.) Co-write `prompts/s1b/translate_task.txt` (Spanish, local only). Split the prologue and chapter 1 of *the-gobi-desert* (lines 1–101 of `s1b/cleaned/source.txt`, 14,595 characters, two or three chunks) with a throwaway script. Translate them in the VS Code chat with a single request, using one subagent per chunk as in Decision 3, and confirm the chat gets through every chunk without stopping to ask anything. Compare with the same passage in the existing eTranslation output (`s1b/translated/es/source.txt`, lines 1–101). Record in this ADR: model(s) used, time spent, how much of the plan's usage it took, the paragraph-count and length-ratio results, and the Director's verdict. **Go or no-go for T1 onwards.**
+- [x] **T1 — `lib/assisted_translation.py`:** prepare, status, validate and merge, as plain functions on a work folder. Unit tests for each validation rule in Decision 6, including a dropped paragraph, unbalanced `[i]`, a preamble line and a changed source hash.
+- [x] **T2 — `TaskWaiting` and the `waiting` status** in `lib/task_loader._run_recorded()` and `lib/orchestrator.run_book()` / `_summarize()`. Tests: a waiting task is not `failed`, blocks its dependents, and is offered again on the next run.
+- [x] **T3 — Show `waiting` everywhere statuses are shown:** `s2 status`, `s3 dashboard`, `tui/services/state.py` and the book screen. Find every place with `grep` for `"stale"` and `"failed"` first, and list them here.
+- [x] **T4 — Wire the provider:** `translation.provider: assisted` in `engines/translation.py`, the `assisted:` config block in `config.example.yaml`, and `--status` / `--restart` options. A test runs `s2 run` twice on a fake book: first run stops at waiting, chunk files are filled in, second run merges and reaches `ortho`.
+- [x] **T5 — Documentation:** README (the three-step flow from Decision 8), `docs/cheat_sheet.txt` (`--status`, `--restart`), and this ADR's implementation notes.
 - [ ] **T6 — First real book:** *the-gobi-desert* end to end with `assisted`, run by the Editorial Director (the commands are given, not run for them).
+
+---
+
+## Implementation Notes (2026-10-28)
+
+What was built, and where it differs from the plan above.
+
+**Code**
+- `lib/assisted_translation.py`: prepare, progress, `validate_chunk` / `validate_all`, `reject`, merge, and `run()`, which the translation engine calls when `translation.provider` is `assisted`. `engines/translation.py` gained `--status` and `--restart`; `--status` creates nothing.
+- `lib/task_loader.py`: `TaskWaiting`. `_run_recorded()` records `status: waiting` with `message` (first line only, so `s2 status` stays one line), `progress` and `work_dir`. Typed by hand, a waiting task prints its message and exits 0 (`_run_task_from_cli`).
+- `lib/orchestrator.py`: `book_status()` has a `waiting` row (`ready_to_continue`), `run_book()` returns a `waiting` list, and `complete` stays false while anything waits.
+- `pipeline.py`: `s2 status` shows `[w]`, `s2 run` prints `[w]` lines *after* the `Done/Failed` block (the terminal UI parses that block, so its format did not change), `book list` calls a waiting book "in progress".
+- `lib/metrics.py`: the translation branch of `enrich()` records `model` when the engine reports one (the `model_note`).
+- Terminal UI: `[w]` mark and "Continue" button on the book screen (`tui/services/state.py`, `tui/screens/book.py`); the cost estimate says assisted translation makes no provider call (`tui/services/estimate.py`); the health screen knows the provider (`tui/services/health.py`).
+- `providers/__init__.py`: `get_translation_provider()` has an `assisted` branch that raises a clear error, because a test pins the factory's provider names to the health table, and anything but `s1b translate` asking for an assisted provider is a mistake.
+
+**Differences from the plan**
+- **`--status` and the ledger.** The plan did not say how a read-only call avoids `_run_recorded()`. `TaskWaiting` has a `record=False` form: same stop, ledger untouched.
+- **Chunk count.** On the real cleaned text of *the-gobi-desert* (checked on a scratch copy, nothing under `books/` touched), 7,000 characters gives **111 chunks**, 3,813–6,996 characters each (average 6,510), none tiny; 14 contain a `---` paragraph. The ADR's "about 105" was an estimate.
+- **`waiting` after a re-run of a finished task.** Recording `waiting` replaces the task's earlier `done` entry, and its dependents stay `done` until the merge succeeds, at which point the existing cascade (ADR 009) marks them `stale`. No new invalidation code.
+- **Not built:** a health check that `prompts/s1b/translate_task.txt` exists, and a count of waiting tasks in the book header of the terminal UI.
+
+**Tests** (`tests/test_assisted_translation.py`, 18 cases, offline, about 20 s): every validation rule; prepare / pending / reject / changed-source on a temporary folder; the full flow through the CLI (`s2 run` stops at translate, chunks are filled in, the next `s2 run` merges and reaches copyedit); a rejected chunk being redone; `--status` leaving the ledger untouched; `--restart` keeping the old folder; the orchestrator summary. The non-UI suite (223 tests) and the affected UI modules (book status, book pipeline, health, estimate, docs) pass; the full UI suite was not run.
+
+**Not verified**
+- Anything involving a real chat: whether one request really gets through all 111 chunks with a subagent each, how much of the plan's usage it takes, and what the translation is like. The draft prompt in `prompts/s1b/translate_task.txt` has never been used.
+- Validation thresholds (0.9–1.6 length ratio) are guesses; the first real chunks will show whether they flag good translations or let bad ones through.

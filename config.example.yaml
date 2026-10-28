@@ -131,7 +131,7 @@ llm:
   #   max_output_tokens: 65536
 
 translation:
-  provider: etranslation          # or: deepl
+  provider: etranslation          # or: deepl, or: assisted (translate in the VS Code chat, ADR 024)
   source_lang: EN
   target_lang: ES
 
@@ -161,6 +161,14 @@ translation:
     # Free for eligible SMEs: a real figure, not a shadow price.
     pricing:
       per_million_characters: 0.0
+
+  # ADR 024 — assisted translation, for provider: assisted. No key and no API: the
+  # pipeline splits the cleaned text into chunk files and stops ("waiting"); you ask
+  # Claude Code in the VS Code chat to translate them (prompts/s1b/translate_task.txt,
+  # yours, gitignored); the next run validates and merges. Both settings optional.
+  assisted:
+    max_chars: 7000               # characters per chunk (at least 500)
+    model_note: ""                # free text kept in the ledger, e.g. "Sonnet 5.5"
 
   # Pricing lives under each provider, so switching providers cannot leave
   # another provider's rate on the dashboard (ADR 022, Decision 5). Optional,

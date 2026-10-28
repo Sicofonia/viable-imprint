@@ -103,6 +103,13 @@ def _fake_options(section: dict, label: str) -> dict:
 
 def get_translation_provider(config: dict) -> TranslationProvider:
     name = config["translation"]["provider"]
+    if name == "assisted":
+        # ADR 024: nothing to construct. engines/translation.py hands the whole
+        # task to lib/assisted_translation.py before it ever asks for a provider.
+        raise click.ClickException(
+            "translation.provider: assisted has no provider object: it is handled by the "
+            "translate task itself (ADR 024). Only `s1b translate` can run it."
+        )
     if name == "etranslation":
         keys = ("ETRANSLATION_APP_NAME", "ETRANSLATION_PASSWORD", "ETRANSLATION_RECEIVER_SECRET")
         missing = [k for k in keys if not os.environ.get(k)]
@@ -151,4 +158,4 @@ def get_translation_provider(config: dict) -> TranslationProvider:
         # ADR 023: tests only. No key, no network; selected by config alone.
         from providers.translation.fake import FakeTranslationProvider
         return FakeTranslationProvider(**_fake_options(config["translation"], "translation"))
-    raise ValueError(f"Unknown translation provider: {name!r}. Supported: etranslation, deepl")
+    raise ValueError(f"Unknown translation provider: {name!r}. Supported: etranslation, deepl, assisted")

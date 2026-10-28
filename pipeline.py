@@ -176,7 +176,7 @@ def book_list(ctx):
             state_text = f"[x] done {finished}"
         elif statuses.count("done") == len(statuses):
             state_text = "all tasks done (not marked: `book done`)"
-        elif statuses.count("done") or "failed" in statuses or "stale" in statuses:
+        elif statuses.count("done") or "failed" in statuses or "stale" in statuses or "waiting" in statuses:
             state_text = "in progress"
         else:
             state_text = "not started"
@@ -344,7 +344,7 @@ def s2():
 @click.argument("book_slug")
 @click.pass_context
 def s2_status(ctx, book_slug):
-    """Show every book-scoped task's status: done, stale, ready, blocked, or failed."""
+    """Show every book-scoped task's status: done, stale, ready, blocked, failed, or waiting."""
     root = _resolve_book_root(ctx.obj["config"], book_slug)
     click.echo(f"Book: {book_slug} ({root})")
     finished = books.done_on(root)
@@ -369,6 +369,9 @@ def s2_status(ctx, book_slug):
         elif row["status"] == "failed":
             retry = "ready to retry" if row["ready_to_retry"] else "blocked"
             click.echo(f"  [!] {name:<20} failed ({retry}) — {row['error']}")
+        elif row["status"] == "waiting":
+            blocked = "" if row["ready_to_continue"] else " (blocked)"
+            click.echo(f"  [w] {name:<20} waiting{blocked} — {row['message']}")
         else:
             click.echo(f"  [ ] {name:<20} blocked — {row['reason']}")
 
@@ -390,6 +393,8 @@ def s2_run(ctx, book_slug, only, step):
         click.echo(f"  [x] {label}")
     for label in summary["failed"]:
         click.echo(f"  [!] {label}")
+    for label in summary["waiting"]:  # after the Done/Failed block, which the terminal UI parses (ADR 024)
+        click.echo(f"  [w] {label} is waiting for you — see its message above; run `s2 run` again afterwards")
     if summary["complete"]:
         click.echo("Book complete — nothing left to run.")
     if summary["failed"]:

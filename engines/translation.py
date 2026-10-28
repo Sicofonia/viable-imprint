@@ -2,7 +2,7 @@ import click
 from pathlib import Path
 
 from lib.chunker import chunk_by_paragraphs
-from lib import manifest
+from lib import assisted_translation, manifest
 from providers import get_translation_provider
 
 CLI_OPTIONS = [
@@ -17,18 +17,56 @@ CLI_OPTIONS = [
              "document translation). Requires a provider that implements "
              "translate_document(); fails clearly if it doesn't.",
     ),
+    click.Option(
+        ["--status"],
+        is_flag=True,
+        default=False,
+        help="Assisted translation only (ADR 024): show how many chunks are "
+             "translated and which are pending, without changing anything.",
+    ),
+    click.Option(
+        ["--restart"],
+        is_flag=True,
+        default=False,
+        help="Assisted translation only (ADR 024): split the text into chunks "
+             "again. The existing work folder is renamed (assisted.old-<time>), "
+             "never deleted.",
+    ),
 ]
 
 
 def run(input_file: Path, root: Path, system: str, output_name: str, config: dict,
-        *, document: bool = False) -> Path:
+        *, document: bool = False, status: bool = False, restart: bool = False) -> Path:
     source_lang = config["translation"].get("source_lang", "EN")
     target_lang = config["translation"].get("target_lang", "ES")
     lang_dir = target_lang.lower()
 
     output_dir = root / system / output_name / lang_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not status:  # `--status` is read-only (ADR 024)
+        output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / input_file.name
+
+    if config["translation"]["provider"] == "assisted":
+        # ADR 024: no provider object. The translating happens in the VS Code
+        # chat; this call prepares chunks, reports progress, or validates and
+        # merges, and raises TaskWaiting while a person still has a step to do.
+        if document:
+            raise click.ClickException("--document does not apply to assisted translation.")
+        output_file, metrics = assisted_translation.run(
+            input_file, root, output_dir, output_file, config, status=status, restart=restart)
+        manifest.update(
+            root,
+            **{
+                f"{output_name}_{lang_dir}": str(output_file.relative_to(root)),
+                "translation_provider": "assisted",
+                "translation_pair": f"{source_lang}→{target_lang}",
+            },
+        )
+        click.echo(f"Saved: {output_file}")
+        return output_file, metrics
+
+    if status or restart:
+        raise click.ClickException("--status and --restart only apply to translation.provider: assisted (ADR 024).")
 
     translator = get_translation_provider(config)
 

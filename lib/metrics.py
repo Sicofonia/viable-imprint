@@ -26,11 +26,14 @@ def enrich(raw_metrics: dict, config: dict) -> dict:
             fields["models_used"] = raw_metrics["models_used"]
         return fields
 
-    return {  # character-based usage (translation)
+    fields = {  # character-based usage (translation)
         "provider": config["translation"]["provider"],
         "usage": usage,
         "cost_usd": _translation_cost(usage, _translation_pricing(config["translation"])),
     }
+    if raw_metrics.get("model"):  # only the assisted provider reports one (ADR 024: a free-text note)
+        fields["model"] = raw_metrics["model"]
+    return fields
 
 
 def _translation_pricing(translation_config: dict):

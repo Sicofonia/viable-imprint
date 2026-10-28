@@ -22,6 +22,8 @@ SYSTEM 1 — OPERATIONS (does the actual editorial work)
   s1b cleanup <source.txt>                    OCR text -> cleaned text
   s1b translate <cleaned.txt> [-d/--document] EN -> ES (eTranslation: one whole-doc request, may take a
                                               while, safe to re-run if interrupted; DeepL: chunked, or -d)
+  s1b translate <cleaned.txt> --status        assisted only (ADR 024): chunks done / pending, read-only
+  s1b translate <cleaned.txt> --restart       assisted only: split again (old folder kept as assisted.old-*)
   s1b ortho <translated.txt>                  orthotypographic pass
   s1b copyedit <ortho.txt>                    copyedit pass
   s1b format <copyedited.txt> [--template <file.odt>]   -> formatted .odt
@@ -86,7 +88,7 @@ SYSTEM 1 — OPERATIONS (does the actual editorial work)
 ------------------------------------------------------------
 SYSTEM 2 — COORDINATION (runs S1's tasks for you)
 ------------------------------------------------------------
-  s2 status <slug>                    what's done / stale / ready / blocked
+  s2 status <slug>                    what's done / stale / ready / blocked / waiting
   s2 run <slug> [--only s1b|s1d] [--step]   run every ready task until nothing's left
   s2 homeostat run                    runs the full S5 homeostat chain (see below)
   s2 homeostat status                 last recorded outcome of each homeostat stage

@@ -162,6 +162,10 @@ def book_status(root: Path) -> list:
         elif status == "failed":
             rows.append({"system": system, "name": name, "status": "failed",
                          "error": entry.get("error"), "ready_to_retry": ready})
+        elif status == "waiting":  # ADR 024: stopped on purpose until a person has done a step
+            rows.append({"system": system, "name": name, "status": "waiting",
+                         "message": entry.get("message"), "progress": entry.get("progress"),
+                         "ready_to_continue": ready})
         elif ready:
             rows.append({"system": system, "name": name, "status": "ready"})
         else:
@@ -244,7 +248,7 @@ def run_book(root: Path, config: dict, only: str = None, step: bool = False) -> 
     within this one (its ledger entry stays non-`done`, so it would otherwise
     reappear in every readiness pass forever).
     """
-    done, failed = [], []
+    done, failed, waiting = [], [], []
     attempted = set()
     while True:
         batch = [(node, input_path) for node, input_path in ready_tasks(root, only=only)
@@ -259,17 +263,22 @@ def run_book(root: Path, config: dict, only: str = None, step: bool = False) -> 
             try:
                 task_loader.run_task(root, config, system, task, input_file=input_path)
                 done.append(label)
+            except task_loader.TaskWaiting as stop:
+                # Not a failure (ADR 024): the task is waiting on a person. Its
+                # dependents stay blocked because its ledger entry is not `done`.
+                click.echo(f"[s2] {label} is waiting: {stop}")
+                waiting.append(label)
             except Exception as e:
                 click.echo(f"[s2] {label} failed: {e}")
                 failed.append(label)
             if step:
-                return _summarize(root, done, failed)
-    return _summarize(root, done, failed)
+                return _summarize(root, done, failed, waiting)
+    return _summarize(root, done, failed, waiting)
 
 
-def _summarize(root: Path, done: list, failed: list) -> dict:
-    remaining = [r for r in book_status(root) if r["status"] in ("ready", "blocked", "failed", "stale")]
-    return {"done": done, "failed": failed, "complete": not remaining}
+def _summarize(root: Path, done: list, failed: list, waiting: list = ()) -> dict:
+    remaining = [r for r in book_status(root) if r["status"] in ("ready", "blocked", "failed", "stale", "waiting")]
+    return {"done": done, "failed": failed, "waiting": list(waiting), "complete": not remaining}
 
 
 def _task_dict(system: str, name: str) -> dict:
