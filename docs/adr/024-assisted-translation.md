@@ -1,6 +1,6 @@
 # ADR 024 — Assisted Translation: Chunk, Translate in Claude Code, Merge
 
-**Status:** Implemented on the branch (2026-10-28), pilot not yet run. Branch-only: this work stays on `feature/adr-024-assisted-translation` and is not planned for `main` for now, because it puts a person back inside a task the pipeline otherwise runs unattended (see **Consequences**). T1–T5 are built and tested offline; **T0 (the pilot) and T6 (a first real book) are the Editorial Director's to run**, and the draft prompt `prompts/s1b/translate_task.txt` is waiting to be reviewed together first. See **Implementation Notes**.
+**Status:** Implemented and used on one full book (*the-gobi-desert*, 2026-10-29). On 2026-11-04 the Editorial Director judged the result clearly better than eTranslation and almost on par with DeepL, and the work was taken to `main` on that basis; until then it was branch-only. It is still a departure from the pipeline's unattended design: a person starts the translation in the VS Code chat between two `s2 run`s (see **Consequences**). Built and tested offline (T1–T5); run end to end on a real book (T6). Not recorded during that run: the model used, the elapsed time and the plan's usage. The prompt `prompts/s1b/translate_task.txt` stays local and is not in the repository (Decision 3). See **Implementation Notes**.
 
 ---
 
@@ -160,7 +160,7 @@ The ledger records `provider: assisted`, `model` from `translation.assisted.mode
 - **No per-chunk review step.** The chat never pauses for approval between chunks.
 - **No imprint-wide glossary** (Decision 5).
 - **No change to `ortho`, `copyedit` or `format`.** They read `translated/es/source.txt` as before.
-- **No merge to `main`** until the Editorial Director decides otherwise.
+- **No merge to `main` before a real book had been translated.** Decided at the start; the Editorial Director's verdict of 2026-11-04 (see **Status**) lifted it.
 
 ---
 
@@ -178,11 +178,11 @@ The ledger records `provider: assisted`, `model` from `translation.assisted.mode
 
 ## Consequences
 
-- **The pipeline is no longer unattended end to end** when `assisted` is selected. That is the departure from the project's direction that keeps this branch-only. `waiting` is designed so the rest of the pipeline treats the gap as normal rather than as an error.
-- **Translation quality depends on the model and the prompt**, checked by the person's review of the merged text, not chunk by chunk. A mistake repeated across the book (a wrongly chosen name in the glossary, say) is found later than with per-chunk review, and fixing it means redoing the affected chunks. The pilot (T0) shows how often that happens.
-- **The person's time per book is small:** one request, possibly a second after an interruption, then the merge run. Elapsed time is set by the model's speed and the plan's usage limits, which the pilot measures.
+- **The pipeline is no longer unattended end to end** when `assisted` is selected. That is the departure from the project's direction, and the reason the work stayed off `main` until a real book had shown it was worth it. `waiting` is designed so the rest of the pipeline treats the gap as normal rather than as an error.
+- **Translation quality depends on the model and the prompt**, checked by the person's review of the merged text, not chunk by chunk. A mistake repeated across the book (a wrongly chosen name in the glossary, say) is found later than with per-chunk review, and fixing it means redoing the affected chunks. The first book (T6) is one data point: the Director judged the result almost on par with DeepL. How often a repeated mistake of this kind turns up over several books is not known.
+- **The person's time per book is small:** one request, possibly a second after an interruption, then the merge run. Elapsed time is set by the model's speed and the plan's usage limits, which were not recorded on the first book.
 - **`waiting` is a new ledger status that other code must handle.** Anything that counts statuses (the orchestrator summary, `s2 status`, `s3 dashboard`, the terminal UI) has to show it, or a waiting book will look stuck or failed. T3 lists every place found.
-- **The usage limits of the Claude Code plan become a production constraint.** A book is roughly 730,000 characters in and a little more out, spread over many chats. The pilot shows how much of the plan one chapter uses.
+- **The usage limits of the Claude Code plan become a production constraint.** A book is roughly 730,000 characters in and a little more out, spread over many chats. All 111 chunks of the first book were translated, but how many chats it took and how much of the plan's usage it used were not recorded.
 - **A translation can be re-checked chunk by chunk afterwards**, because the work folder keeps every source chunk next to its translation. eTranslation's whole-document output could not be checked this way.
 
 ---
@@ -191,13 +191,13 @@ The ledger records `provider: assisted`, `model` from `translation.assisted.mode
 
 Each task is done when its own check passes. Tests run offline (CONTRIBUTING.md), with a fake work folder, not a real chat.
 
-- [ ] **T0 — Pilot.** (Not done: it needs the prompt reviewed together and a real chat session, which the Director runs. T1–T5 were built before it, at the Director's request; a no-go would mean shelving the branch.) Co-write `prompts/s1b/translate_task.txt` (Spanish, local only). Split the prologue and chapter 1 of *the-gobi-desert* (lines 1–101 of `s1b/cleaned/source.txt`, 14,595 characters, two or three chunks) with a throwaway script. Translate them in the VS Code chat with a single request, using one subagent per chunk as in Decision 3, and confirm the chat gets through every chunk without stopping to ask anything. Compare with the same passage in the existing eTranslation output (`s1b/translated/es/source.txt`, lines 1–101). Record in this ADR: model(s) used, time spent, how much of the plan's usage it took, the paragraph-count and length-ratio results, and the Director's verdict. **Go or no-go for T1 onwards.**
+- [x] **T0 — Pilot.** (Not run as written: there was no separate chapter-1 pilot. It was replaced by a three-chunk experiment on 2026-10-28 (chunks 10–12 of *the-gobi-desert*; all three passed validation, length ratios 1.03–1.07), which led to the `en/` and `es/` folders and the descriptive-names rule, and then by the full book in T6. Verdict: go.) Co-write `prompts/s1b/translate_task.txt` (Spanish, local only). Split the prologue and chapter 1 of *the-gobi-desert* (lines 1–101 of `s1b/cleaned/source.txt`, 14,595 characters, two or three chunks) with a throwaway script. Translate them in the VS Code chat with a single request, using one subagent per chunk as in Decision 3, and confirm the chat gets through every chunk without stopping to ask anything. Compare with the same passage in the existing eTranslation output (`s1b/translated/es/source.txt`, lines 1–101). Record in this ADR: model(s) used, time spent, how much of the plan's usage it took, the paragraph-count and length-ratio results, and the Director's verdict. **Go or no-go for T1 onwards.**
 - [x] **T1 — `lib/assisted_translation.py`:** prepare, status, validate and merge, as plain functions on a work folder. Unit tests for each validation rule in Decision 6, including a dropped paragraph, unbalanced `[i]`, a preamble line and a changed source hash.
 - [x] **T2 — `TaskWaiting` and the `waiting` status** in `lib/task_loader._run_recorded()` and `lib/orchestrator.run_book()` / `_summarize()`. Tests: a waiting task is not `failed`, blocks its dependents, and is offered again on the next run.
 - [x] **T3 — Show `waiting` everywhere statuses are shown:** `s2 status`, `s3 dashboard`, `tui/services/state.py` and the book screen. Find every place with `grep` for `"stale"` and `"failed"` first, and list them here.
 - [x] **T4 — Wire the provider:** `translation.provider: assisted` in `engines/translation.py`, the `assisted:` config block in `config.example.yaml`, and `--status` / `--restart` options. A test runs `s2 run` twice on a fake book: first run stops at waiting, chunk files are filled in, second run merges and reaches `ortho`.
 - [x] **T5 — Documentation:** README (the three-step flow from Decision 8), `docs/cheat_sheet.txt` (`--status`, `--restart`), and this ADR's implementation notes.
-- [ ] **T6 — First real book:** *the-gobi-desert* end to end with `assisted`, run by the Editorial Director (the commands are given, not run for them).
+- [x] **T6 — First real book:** *the-gobi-desert* end to end with `assisted`, run by the Editorial Director (the commands are given, not run for them). Done 2026-10-29; see **First real book** in the Implementation Notes.
 
 ---
 
@@ -224,6 +224,12 @@ What was built, and where it differs from the plan above.
 
 **Tests** (`tests/test_assisted_translation.py`, 18 cases, offline, about 20 s): every validation rule; prepare / pending / reject / changed-source on a temporary folder; the full flow through the CLI (`s2 run` stops at translate, chunks are filled in, the next `s2 run` merges and reaches copyedit); a rejected chunk being redone; `--status` leaving the ledger untouched; `--restart` keeping the old folder; the orchestrator summary. The non-UI suite (223 tests) and the affected UI modules (book status, book pipeline, health, estimate, docs) pass; the full UI suite was not run.
 
+**First real book (T6, run 2026-10-29)**
+- *the-gobi-desert*: 111 chunks, 111 translations in `es/`, no `.rejected.txt` left, merged on 2026-10-29. In the ledger `s1b.translate` is `done` with `provider: assisted` and 771,020 characters; `cleanup`, `ortho`, `copyedit` and `format` are `done` too, none `stale`.
+- Size: the merged file is 790,287 bytes against 730,335 for the cleaned English (8% longer; eTranslation's was 797,052, 9% longer). The book as a whole sits well inside the 0.9–1.6 length bounds.
+- The glossary grew to 882 lines over the book. Every subagent reads it whole, so on a longer book it is the first thing to watch (a trimmed copy per chunk would be the fix).
+- Verdict (Editorial Director, 2026-11-04): clearly better than eTranslation, almost on par with DeepL. That is what decided the move to `main`.
+
 **Not verified**
-- Anything involving a real chat: whether one request really gets through all 111 chunks with a subagent each, how much of the plan's usage it takes, and what the translation is like. The draft prompt in `prompts/s1b/translate_task.txt` has never been used.
-- Validation thresholds (0.9–1.6 length ratio) are guesses; the first real chunks will show whether they flag good translations or let bad ones through.
+- Not recorded on the first book: the model used (the ledger has none for it; `translation.assisted.model_note` is there to record it next time), the elapsed time, how many chats it took, how much of the plan's usage it used, and whether the chat ever stopped to ask.
+- The length bounds (0.9–1.6) have not met a bad chunk on real data: no rejected file remains from the first book. They are still guesses until one does.
