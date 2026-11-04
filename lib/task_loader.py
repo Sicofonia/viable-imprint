@@ -17,6 +17,23 @@ from lib import manifest, metrics, paths
 _RESERVED_KEYS = ("name", "engine", "output", "input", "book_scoped")
 
 
+class TaskWaiting(Exception):
+    """Raised by an engine whose task cannot finish until a person has done
+    something outside the process (ADR 024: translating chunks in the Claude
+    Code chat). It is not a failure: `_run_recorded()` records the task as
+    `waiting` (with `progress` and the work folder) instead of `failed`, the
+    System 2 orchestrator lists it apart from failures, and the CLI exits 0.
+    `record=False` is for a read-only look (`--status`): same stop, but the
+    ledger is left exactly as it was.
+    """
+
+    def __init__(self, message: str, progress: str = None, work_dir: str = None, record: bool = True):
+        super().__init__(message)
+        self.progress = progress
+        self.work_dir = work_dir
+        self.record = record
+
+
 def load_system_tasks(system_name: str) -> list:
     manifest_path = Path("systems") / system_name / "tasks.yaml"
     if not manifest_path.exists():
@@ -64,6 +81,13 @@ def _run_recorded(run_fn, root: Path, system: str, name: str, config: dict):
     start = time.monotonic()
     try:
         result = run_fn()
+    except TaskWaiting as waiting:
+        if waiting.record:
+            fields = {"message": str(waiting).splitlines()[0], "progress": waiting.progress, "work_dir": waiting.work_dir}
+            manifest.record_task(root, key, status="waiting", attempted_at=_now_iso(),
+                                  duration_seconds=round(time.monotonic() - start, 2),
+                                  **{k: v for k, v in fields.items() if v})
+        raise
     except BaseException as e:
         # BaseException, not Exception: a Ctrl+C during a long provider retry
         # loop is a KeyboardInterrupt, which Exception doesn't catch — left
@@ -119,6 +143,15 @@ def run_task(root: Path, config: dict, system: str, task: dict,
     return _run_recorded(run_fn, root, system, name, config)
 
 
+def _run_task_from_cli(root: Path, config: dict, system: str, task: dict, **kwargs):
+    """`run_task()` for a command typed by hand: a task that is waiting on a
+    person (ADR 024) prints why and exits 0, instead of a traceback."""
+    try:
+        run_task(root, config, system, task, **kwargs)
+    except TaskWaiting as waiting:
+        click.echo(str(waiting))
+
+
 def _build_command(task: dict, system_name: str) -> click.Command:
     name = task["name"]
     engine = importlib.import_module(f"engines.{task['engine']}")
@@ -133,7 +166,7 @@ def _build_command(task: dict, system_name: str) -> click.Command:
         def callback(_task=task, _system=system_name, **cli_kwargs):
             config = click.get_current_context().obj["config"]
             root = paths.intelligence_root(config)
-            run_task(root, config, _system, _task, **cli_kwargs)
+            _run_task_from_cli(root, config, _system, _task, **cli_kwargs)
 
         return click.Command(name=name, params=cli_options, callback=callback)
 
@@ -143,6 +176,6 @@ def _build_command(task: dict, system_name: str) -> click.Command:
         config = click.get_current_context().obj["config"]
         resolved = Path(input_file).resolve()
         root = paths.book_root(resolved)
-        run_task(root, config, _system, _task, input_file=resolved, **cli_kwargs)
+        _run_task_from_cli(root, config, _system, _task, input_file=resolved, **cli_kwargs)
 
     return click.Command(name=name, params=[argument] + cli_options, callback=callback)

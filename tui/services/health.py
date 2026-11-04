@@ -22,7 +22,7 @@ OK, WARNING, ERROR, INFO = "ok", "warning", "error", "info"
 LLM_ENV = {"z-ai": ["ZAI_API_KEY"], "mistral": ["MISTRAL_API_KEY"],
            "google-aistudio": ["GOOGLE_AISTUDIO_API_KEY"], "fake": []}
 TRANSLATION_ENV = {"etranslation": ["ETRANSLATION_APP_NAME", "ETRANSLATION_PASSWORD", "ETRANSLATION_RECEIVER_SECRET"],
-                   "deepl": ["DEEPL_API_KEY"], "fake": []}
+                   "deepl": ["DEEPL_API_KEY"], "assisted": [], "fake": []}
 
 # manifest keys that name a file the task needs
 FILE_KEYS = ("prompt", "reduce_prompt", "metadata_config", "style_config", "sources_config")

@@ -66,7 +66,7 @@ def format_activity(iso: str) -> str:
 class TaskRow:
     system: str
     name: str
-    status: str                 # done | stale | ready | blocked | failed
+    status: str                 # done | stale | ready | blocked | failed | waiting
     detail: str                 # one line: the output, the reason, the error ...
     output: str = None          # the ledger's output path, relative to the book
     edited: bool = False        # output edited by hand since the task ran (informational)
@@ -92,6 +92,9 @@ def describe_task(row: dict) -> TaskRow:
     if status == "failed":
         ready = row["ready_to_retry"]
         return TaskRow(detail=f"{row['error']} - {'ready to retry' if ready else 'blocked'}", runnable=ready, **common)
+    if status == "waiting":
+        ready = row["ready_to_continue"]
+        return TaskRow(detail=f"{row['message']}{'' if ready else ' - blocked'}", runnable=ready, **common)
     if status == "ready":
         return TaskRow(detail="ready", runnable=True, **common)
     return TaskRow(detail=row["reason"], runnable=False, **common)

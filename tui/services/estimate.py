@@ -134,6 +134,11 @@ def estimate_task(ctx: Context, system: str, name: str, input_file=None, *, docu
     provider_name = translation.get("provider")
     estimate = Estimate("translation", provider=provider_name, input_chars=len(text) if text is not None else None,
                         label=f"{system} {name}")
+    if provider_name == "assisted":
+        estimate.calls = 0
+        estimate.notes.append("Assisted translation makes no provider call (ADR 024): this run prepares the chunk "
+                              "files, reports progress, or merges them. The translating itself happens in the VS Code chat.")
+        return estimate
     if provider_name == "etranslation":
         estimate.notes.append("eTranslation is asynchronous: expect a wait of minutes, up to two hours. "
                               "If the run is interrupted, running it again resumes the request already in flight.")
