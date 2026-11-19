@@ -96,7 +96,8 @@ class ModelTests(unittest.TestCase):
         root = click.Group(name="root", commands={"sx": group})
         specs = {s.name: s for s in build_model(root)}
         self.assertEqual(list(specs), ["sx extra"])
-        self.assertEqual([p.name for p in specs["sx extra"].params], ["input_file", "document"])  # engine CLI_OPTIONS too
+        # engine CLI_OPTIONS too: the translation engine's --document, then ADR 024's --status and --restart
+        self.assertEqual([p.name for p in specs["sx extra"].params], ["input_file", "document", "status", "restart"])
 
 
 class ArgvTests(GuardedCase):
