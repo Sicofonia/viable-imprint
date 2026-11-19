@@ -8,7 +8,8 @@ Python changes needed for prompt-driven tasks.
 
 Usage examples:
   python pipeline.py init life-as-explorer
-  python pipeline.py s1b cleanup books/life-as-explorer/s1b/source/my-life.txt
+  python pipeline.py s1b prepass books/life-as-explorer/s1b/source/my-life.txt
+  python pipeline.py s1b cleanup books/life-as-explorer/s1b/prepass/my-life.txt
   python pipeline.py s1b translate books/life-as-explorer/s1b/cleaned/my-life.txt
   python pipeline.py s1b ortho books/life-as-explorer/s1b/translated/es/my-life.txt
   python pipeline.py s1b copyedit books/life-as-explorer/s1b/ortho/es/my-life.txt
@@ -33,7 +34,7 @@ import yaml
 from dotenv import load_dotenv
 
 import pdf_bleed_tool
-from lib import books, candidates, dashboard, formatting, homeostat, interrupt, manifest, orchestrator, paths, policy_check
+from lib import books, candidates, dashboard, formatting, homeostat, interrupt, manifest, ocr_prepass, orchestrator, paths, policy_check
 from lib import task_loader
 from lib.task_loader import build_system_group
 
@@ -196,7 +197,49 @@ cli.add_command(book)
 # tasks.yaml. Only systems with implemented tasks are registered here.
 # ---------------------------------------------------------------------------
 
-cli.add_command(build_system_group("s1b", "System 1B — Editorial Production"))
+# s1b mixes manifest-driven tasks (cleanup … format) with one hand-written,
+# non-ledger utility (prepass, ADR 025) — same arrangement as s5 below.
+_s1b_group = build_system_group("s1b", "System 1B — Editorial Production")
+
+
+@_s1b_group.command(name="prepass")
+@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--output", "output", type=click.Path(dir_okay=False), default=None,
+              help="Where to write the result. Default: <book>/s1b/prepass/<same file name>.")
+@click.option("--report", "report", is_flag=False, flag_value="auto", default=None,
+              help="Also write an audit log (every removed line, chapter headings, unresolved hyphens). "
+                   "Bare --report writes <output>.report.txt; or pass a path.")
+def s1b_prepass(input_file, output, report):
+    """Deterministic OCR pre-pass (ADR 025): no LLM, no ledger, not run by `s2 run`.
+
+    Removes page numbers and running headers, repairs chapter headings, joins
+    line-end hyphens, repairs ellipses, quotes and spacing, and groups the text
+    into provisional paragraph blocks. Run it before `s1b cleanup`, then pass
+    the output file to cleanup. The source file is never modified."""
+    source = Path(input_file).resolve()
+    if output:
+        target = Path(output).resolve()
+    else:
+        target = paths.book_root(source) / "s1b" / "prepass" / source.name
+    if target == source:
+        raise click.ClickException("The output file would overwrite the input; choose another --output.")
+    result = ocr_prepass.prepass_file(source, target)
+    click.echo(result.summary())
+    click.echo(f"Saved: {target}")
+    if report:
+        report_path = Path(str(target) + ".report.txt") if report == "auto" else Path(report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(result.audit(), encoding="utf-8")
+        click.echo(f"Report: {report_path}")
+    if result.hyphens_unresolved:
+        click.echo(f"{len(result.hyphens_unresolved)} hyphen(s) are marked {ocr_prepass.HYPHEN_MARKER}; "
+                   f"`s1b cleanup` resolves them.")
+    if result.chapter_checks:
+        click.echo(f"{len(result.chapter_checks)} chapter heading(s) need a look; run again with --report for details.")
+    click.echo(f"Next: python pipeline.py s1b cleanup {target}")
+
+
+cli.add_command(_s1b_group)
 cli.add_command(build_system_group("s1d", "System 1D — Publication and Marketing"))
 cli.add_command(build_system_group("s4", "System 4 — Strategic Intelligence"))
 

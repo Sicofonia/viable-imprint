@@ -13,6 +13,14 @@ tasks:
     # configured Google AI Studio model (config.yaml's llm.limits), or
     # falls back to the legacy, Mistral-proven 8000 if that provider is
     # selected instead — see docs/adr/018-provider-aware-chunk-sizing.md.
+    #
+    # min_output_ratio (see ortho below): since ADR 025 the OCR clean-up work
+    # that used to shrink this stage's text (page numbers, running headers,
+    # line breaks) is done by `s1b prepass` before it, so cleanup is a
+    # near-1:1 pass again and a reply under 90% of the input means text was
+    # dropped. Run on a raw, un-pre-passed source the page apparatus alone can
+    # make a chunk legitimately shrink a few percent, which 0.9 still allows.
+    min_output_ratio: 0.9
 
   - name: translate
     engine: translation
