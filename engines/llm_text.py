@@ -96,8 +96,10 @@ def _complete_chunk(llm, system_prompt: str, chunk: str, *, temperature: float,
     sets min_output_ratio in tasks.yaml declares its output should be roughly
     as long as its input (ortho, copyedit: per-paragraph substitutions only),
     so a reply under that fraction of the input is retried once, then fails
-    loud rather than being written to disk. Deliberately opt-in: cleanup
-    legitimately shrinks text (page apparatus is deleted).
+    loud rather than being written to disk. Deliberately opt-in: only tasks
+    whose output is roughly as long as their input should set it. Since ADR 025
+    cleanup does too (page apparatus is removed by `s1b prepass`, not by the
+    LLM), so it is no longer the exception it was here.
     """
     guarded = min_output_ratio is not None and len(chunk) >= _MIN_GUARDED_CHUNK_CHARS
     for attempt in (1, 2):
