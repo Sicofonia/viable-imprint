@@ -19,7 +19,15 @@ candidate new <slug>                 create a candidate brief folder
 SYSTEM 1 — OPERATIONS (does the actual editorial work)
 ------------------------------------------------------------
 1B — Editorial Production (sequential, each reads the previous output)
-  s1b cleanup <source.txt>                    OCR text -> cleaned text
+  s1b prepass <source.txt> [--output F] [--report [F]]
+                                              OCR text -> pre-passed text in s1b/prepass/ (ADR 025). NOT a
+                                              manifest task: no LLM, no ledger, not run by "s2 run" -- run it
+                                              by hand BEFORE cleanup. Removes page numbers/headers, fixes
+                                              chapter headings, joins hyphens, repairs quotes/ellipses, groups
+                                              provisional paragraphs; --report writes an audit log
+  s1b cleanup <prepass.txt>                   pre-passed text -> cleaned text (LLM judgement: paragraphs,
+                                              {~} hyphens, OCR words, footnotes). A raw source still works
+                                              but then does mechanical work badly; "s2 run" reads source/
   s1b translate <cleaned.txt> [-d/--document] EN -> ES (eTranslation: one whole-doc request, may take a
                                               while, safe to re-run if interrupted; DeepL: chunked, or -d)
   s1b translate <cleaned.txt> --status        assisted only (ADR 024): chunks done / pending, read-only
@@ -122,8 +130,8 @@ SYSTEM 5 — IDENTITY, VALUES & POLICY (advisory only, nothing auto-decides)
 ------------------------------------------------------------
 TIP: run "uv run python pipeline.py <system> --help" any time — s1b, s1d and s4
 are generated live from each systems/<sN>/tasks.yaml, so --help always matches
-whatever's actually configured. (s1c, s2, s3, s5 and book/candidate are
-hand-written commands, but --help works for them too.)
+whatever's actually configured. (s1b prepass, s1c, s2, s3, s5 and book/candidate
+are hand-written commands, but --help works for them too.)
 
 NOTES
   - LLM provider: google-aistudio (default) or mistral, set via llm.provider in
